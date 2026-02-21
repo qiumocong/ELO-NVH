@@ -9,10 +9,10 @@ from tqdm import tqdm
 # ================= 配置区域 =================
 
 # 1. 原始数据根目录 (包含 NG/OK 文件夹的地方)
-SOURCE_ROOT = Path("/media/qmc/新加卷/DATA_Processed_All")
+SOURCE_ROOT = Path("./DATA_Processed_All")
 
 # 2. 【新】清洗后数据存放的根目录 (脚本会自动创建)
-TARGET_ROOT = Path("/media/qmc/新加卷/DATA_Cleaned_Final")
+TARGET_ROOT = Path("./DATA_Cleaned_Final")
 
 # 3. 原始标签文件路径
 SOURCE_CSV_PATH = SOURCE_ROOT / "labels.csv"

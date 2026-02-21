@@ -14,19 +14,19 @@ from sklearn.metrics import confusion_matrix, classification_report
 
 CONFIG = {
     # 路径配置
-    "CSV_PATH": "/media/qmc/新加卷/DATA_Processed_All/labels.csv",
+    "CSV_PATH": "./DATA_Processed_All/labels.csv",
     "SAVE_DIR": "./logs",
     
     # 音频参数 (根据 soxi 结果)
     "SAMPLE_RATE": 22050,
     # 设定长度 (根据之前的统计结果，留有余量)
-    "LEN_CW": 110000,   # 约 5秒
-    "LEN_CCW": 150000,  # 约 6.8秒
+    "LEN_CW": 200000,   # 约 5秒
+    "LEN_CCW": 200000,  # 约 6.8秒
     # 总输入长度 = CW + CCW
-    "TOTAL_LEN": 260000, 
+    "TOTAL_LEN": 400000,
     
     # 训练超参数
-    "BATCH_SIZE": 32,
+    "BATCH_SIZE": 8,
     "EPOCHS": 30,
     "LR": 0.001,
     "NUM_WORKERS": 8,   # 根据CPU核心数调整

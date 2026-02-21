@@ -9,10 +9,10 @@ import threading
 # ================= 配置区域 =================
 
 # 1. 源数据根目录
-SOURCE_ROOT = Path("/media/qmc/新加卷/DATA")
+SOURCE_ROOT = Path("./DATA")
 
 # 2. 输出数据目录
-TARGET_ROOT = Path("/media/qmc/新加卷/DATA_Processed_All")
+TARGET_ROOT = Path("./DATA_Processed_All")
 
 # 3. 标签文件保存路径
 LABEL_FILE = TARGET_ROOT / "labels.csv"
@@ -79,6 +79,44 @@ def scan_tasks(source_dir, target_root_name):
                         })
     return tasks
 
+def scan_tasks_new(source_dir, target_root_name):
+    tasks = []
+    print("正在扫描目录结构，生成任务列表...")
+
+    if not source_dir.exists():
+        return []
+
+    for category_path in source_dir.iterdir():
+        label_type = os.path.basename(category_path)
+    # # 遍历 NG/OK
+    # for label_type in ["NG", "OK"]:
+    #     category_path = day_folder / label_type
+    #     if not category_path.exists():
+    #         continue
+
+        # 遍历样本
+        for sample_folder in category_path.iterdir():
+            if not sample_folder.is_dir():
+                continue
+
+            # 遍历视角 (这是最小任务单元)
+            for view_folder in sample_folder.iterdir():
+                if not view_folder.is_dir():
+                    continue
+
+                # 准备任务数据
+                raw_name = f"{sample_folder.name}_{view_folder.name}"
+                clean_name = raw_name.replace(" ", "")  # 去空格
+
+                tasks.append({
+                    "src_path": view_folder,
+                    "clean_name": clean_name,
+                    "label": label_type,
+                    "year": "None",
+                    "date": "None"
+                })
+    return tasks
+
 def process_single_task(task):
     """
     第二阶段：工作线程执行的具体函数
@@ -129,7 +167,8 @@ def main():
     print(f"启用线程数: {MAX_WORKERS}")
 
     # 2. 获取所有任务
-    all_tasks = scan_tasks(SOURCE_ROOT, TARGET_ROOT.name)
+    # all_tasks = scan_tasks(SOURCE_ROOT, TARGET_ROOT.name)
+    all_tasks = scan_tasks_new(SOURCE_ROOT, TARGET_ROOT.name)
     total_count = len(all_tasks)
     print(f"扫描完成，共发现 {total_count} 个待处理文件夹。")
     print("-" * 30)

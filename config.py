@@ -7,7 +7,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 CONFIG = {
     # ================= 路径配置 =================
-    "CSV_PATH": "/media/qmc/新加卷/DATA_Processed_All/labels.csv", # 建议使用清洗后的 labels_cleaned.csv
+    "CSV_PATH": "./DATA_Processed_All/labels.csv", # 建议使用清洗后的 labels_cleaned.csv
     "SAVE_DIR": SAVE_DIR,
     "MODEL_SAVE_PATH": os.path.join(SAVE_DIR, "best_model.pth"),
 
@@ -25,7 +25,7 @@ CONFIG = {
     "TOTAL_LEN": 260000, 
     
     # ================= 训练超参数 =================
-    "BATCH_SIZE": 32,
+    "BATCH_SIZE": 4,
     "EPOCHS": 30,
     "LR": 0.001,
     "NUM_WORKERS": 8,   # 根据CPU核心数调整

@@ -42,8 +42,9 @@ def evaluate(model, loader, device, phase="Validation"):
     report_dict = classification_report(all_labels, all_preds, output_dict=True)
     # 假设 NG 的 label id 是 1，根据 labels.csv 的实际情况调整
     ng_recall = report_dict['1']['recall']
+    acc = report_dict["accuracy"]
     
-    return avg_loss, ng_recall
+    return avg_loss, ng_recall, acc
 
 def train_main():
     # 1. 获取数据
@@ -59,6 +60,7 @@ def train_main():
     optimizer = optim.Adam(model.parameters(), lr=CONFIG["LR"])
     
     best_ng_recall = 0.0
+    best_val_acc = 0.0
     
     # 4. 训练循环
     for epoch in range(CONFIG["EPOCHS"]):
@@ -87,14 +89,15 @@ def train_main():
             pbar.set_postfix({'loss': f'{loss.item():.4f}', 'acc': f'{100*correct/total:.2f}%'})
             
         # 5. 验证
-        val_loss, val_ng_recall = evaluate(model, val_loader, device, phase="Validation")
+        val_loss, val_ng_recall, val_acc = evaluate(model, val_loader, device, phase="Validation")
         
         # 6. 保存最佳模型 (以 NG Recall 为准)
-        if val_ng_recall > best_ng_recall:
-            best_ng_recall = val_ng_recall
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             torch.save(model.state_dict(), CONFIG["MODEL_SAVE_PATH"])
-            print(f"🌟 新的最佳模型已保存! NG Recall: {best_ng_recall:.4f}")
-            
+            # print(f"🌟 新的最佳模型已保存! NG Recall: {best_ng_recall:.4f}")
+            print(f"🌟 新的最佳模型已保存! Val Accuracy: {best_val_acc:.4f}")
+
     # 7. 最终测试
     print("\n训练结束，正在进行最终测试集评估...")
     model.load_state_dict(torch.load(CONFIG["MODEL_SAVE_PATH"]))
