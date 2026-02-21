@@ -87,6 +87,32 @@
       margin-bottom: 10px;
     }
 
+    /* ===== Folder picker row ===== */
+    .folder-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .folder-btn {
+      padding: 7px 18px;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      letter-spacing: 2px;
+      transition: background .15s, color .15s;
+    }
+    .folder-btn:hover { background: var(--accent-lo); }
+    .folder-hint {
+      font-size: 10px;
+      color: var(--txt-dim);
+      letter-spacing: 1px;
+    }
+
     /* ===== Channel grid ===== */
     .channels {
       display: grid;
@@ -336,6 +362,18 @@
   <!-- channels -->
   <div>
     <div class="section-label">音频通道 · AUDIO CHANNELS</div>
+
+    <!-- folder picker -->
+    <div class="folder-row">
+      <button class="folder-btn" onclick="document.getElementById('fi-folder').click()">
+        📁 选择文件夹
+      </button>
+      <input type="file" id="fi-folder" style="display:none"
+             webkitdirectory accept=".wav,.flac,.mp3"
+             onchange="onFolderInput(this)">
+      <span class="folder-hint" id="folderHint">选择包含四个通道音频文件的文件夹（CW_X / CCW_X / CW_Z / CCW_Z）</span>
+    </div>
+
     <div class="channels">
 
       <!-- CW_X -->
@@ -575,6 +613,48 @@
   function onFileInput(ch, input) {
     if (input.files[0]) loadFile(ch, input.files[0]);
     input.value = '';           // allow re-selection of same file
+  }
+
+  /* ---------- folder selection ---------- */
+  // Map channel keys to the patterns we accept in filenames (case-insensitive).
+  const CH_PATTERNS = {
+    cw_x:  /^cw_x(\.|$)/i,
+    ccw_x: /^ccw_x(\.|$)/i,
+    cw_z:  /^cw_z(\.|$)/i,
+    ccw_z: /^ccw_z(\.|$)/i,
+  };
+
+  function onFolderInput(input) {
+    const allFiles = Array.from(input.files);
+    input.value = '';   // allow re-selection of same folder
+
+    const matched = {};
+    for (const [ch, pattern] of Object.entries(CH_PATTERNS)) {
+      const f = allFiles.find(file => pattern.test(file.name));
+      if (f) matched[ch] = f;
+    }
+
+    const matchedCount = Object.keys(matched).length;
+    if (matchedCount === 0) {
+      document.getElementById('folderHint').textContent =
+        '⚠ 未在所选文件夹中找到匹配的音频文件（需包含 CW_X / CCW_X / CW_Z / CCW_Z）';
+      document.getElementById('folderHint').style.color = 'var(--warn)';
+      return;
+    }
+
+    for (const [ch, file] of Object.entries(matched)) {
+      loadFile(ch, file);
+    }
+
+    const missing = CHANNELS.filter(c => !matched[c]);
+    if (missing.length === 0) {
+      document.getElementById('folderHint').textContent = '✓ 已从文件夹加载全部 4 个通道';
+      document.getElementById('folderHint').style.color = 'var(--ok)';
+    } else {
+      document.getElementById('folderHint').textContent =
+        `⚠ 已加载 ${matchedCount} 个通道，未找到：${missing.map(c => c.toUpperCase()).join('、')}`;
+      document.getElementById('folderHint').style.color = 'var(--warn)';
+    }
   }
 
   /* ---------- load & visualise ---------- */
