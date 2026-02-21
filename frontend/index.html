@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>电机音频质量检测系统 · YANPU</title>
+  <style>
+    /* ===== Design tokens ===== */
+    :root {
+      --bg:        #080c14;
+      --bg-panel:  #0f1623;
+      --bg-card:   #141d2b;
+      --bg-input:  #0a0e1a;
+      --border:    #1e2d45;
+      --border-hi: #2a4060;
+      --txt:       #cdd9ec;
+      --txt-dim:   #5a7090;
+      --accent:    #1e90ff;
+      --accent-lo: rgba(30,144,255,.12);
+      --ok:        #00e676;
+      --ok-lo:     rgba(0,230,118,.1);
+      --ng:        #ff1744;
+      --ng-lo:     rgba(255,23,68,.1);
+      --warn:      #ffab00;
+    }
+
+    /* ===== Reset / Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 13px; }
+    body {
+      font-family: 'Consolas', 'Courier New', monospace;
+      background: var(--bg);
+      color: var(--txt);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== Top bar ===== */
+    .topbar {
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-hi);
+      padding: 0 24px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-shrink: 0;
+    }
+    .topbar-brand {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    .topbar-sep { color: var(--border-hi); }
+    .topbar-meta { color: var(--txt-dim); font-size: 11px; letter-spacing: 1px; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .led {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 6px var(--ok);
+      animation: ledPulse 2.4s ease-in-out infinite;
+    }
+    @keyframes ledPulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    .topbar-status { font-size: 11px; color: var(--txt-dim); }
+
+    /* ===== Main layout ===== */
+    .main {
+      flex: 1;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 1440px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* ===== Section label ===== */
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: var(--txt-dim);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    /* ===== Channel grid ===== */
+    .channels {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+
+    .ch-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      transition: border-color .2s;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ch-card.loaded  { border-color: var(--ok); }
+    .ch-card.active  { border-color: var(--accent); }
+
+    .ch-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .ch-id {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 1px;
+    }
+    .ch-sub { font-size: 10px; color: var(--txt-dim); letter-spacing: 2px; }
+
+    /* drop zone */
+    .dropzone {
+      border: 2px dashed var(--border-hi);
+      border-radius: 5px;
+      padding: 16px 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      user-select: none;
+    }
+    .dropzone:hover, .dropzone.over {
+      border-color: var(--accent);
+      background: var(--accent-lo);
+    }
+    .dropzone input { display: none; }
+    .dz-icon { font-size: 22px; margin-bottom: 5px; }
+    .dz-txt  { font-size: 10px; color: var(--txt-dim); line-height: 1.5; }
+
+    /* waveform */
+    .waveform-wrap {
+      position: relative;
+      height: 72px;
+      background: var(--bg-input);
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .waveform-wrap canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+    .waveform-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--txt-dim);
+      letter-spacing: 2px;
+    }
+
+    /* file info */
+    .ch-info {
+      font-size: 10px;
+      color: var(--txt-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ch-info.ready { color: var(--ok); }
+
+    /* ===== Bottom row ===== */
+    .bottom {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 12px;
+    }
+
+    /* control panel */
+    .ctrl-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .detect-btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity .15s, transform .1s;
+    }
+    .detect-btn:hover:not(:disabled) { opacity: .85; }
+    .detect-btn:active:not(:disabled) { transform: scale(.98); }
+    .detect-btn:disabled { opacity: .35; cursor: not-allowed; }
+    .detect-btn.running {
+      background: var(--warn);
+      animation: btnPulse .7s ease-in-out infinite;
+    }
+    @keyframes btnPulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+    .sys-table { width: 100%; border-collapse: collapse; }
+    .sys-table td {
+      padding: 5px 0;
+      font-size: 11px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sys-table td:last-child { text-align: right; }
+    .sys-table tr:last-child td { border-bottom: none; }
+    .tag-ok   { color: var(--ok); }
+    .tag-warn { color: var(--warn); }
+    .tag-ng   { color: var(--ng); }
+    .tag-dim  { color: var(--txt-dim); }
+
+    /* ===== Result panel ===== */
+    .result-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .result-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 80px;
+      font-weight: 900;
+      letter-spacing: 10px;
+      border-radius: 8px;
+      padding: 14px;
+      transition: all .3s;
+      min-height: 120px;
+    }
+    .result-badge.idle {
+      color: var(--txt-dim);
+      border: 2px solid var(--border);
+    }
+    .result-badge.ok {
+      color: var(--ok);
+      background: var(--ok-lo);
+      border: 2px solid var(--ok);
+      text-shadow: 0 0 30px var(--ok);
+    }
+    .result-badge.ng {
+      color: var(--ng);
+      background: var(--ng-lo);
+      border: 2px solid var(--ng);
+      text-shadow: 0 0 30px var(--ng);
+      animation: ngFlash .4s ease;
+    }
+    @keyframes ngFlash {
+      0%  { transform: scale(.94); }
+      50% { transform: scale(1.04); }
+      100%{ transform: scale(1); }
+    }
+
+    /* probability bars */
+    .bars { display: flex; flex-direction: column; gap: 8px; }
+    .bar-row { display: flex; flex-direction: column; gap: 3px; }
+    .bar-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--txt-dim);
+    }
+    .bar-track {
+      height: 7px;
+      background: var(--bg-input);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width .55s cubic-bezier(.4,0,.2,1);
+    }
+    .bar-fill.ok { background: var(--ok); }
+    .bar-fill.ng { background: var(--ng); }
+
+    .result-ts {
+      font-size: 10px;
+      color: var(--txt-dim);
+      text-align: right;
+      letter-spacing: 1px;
+    }
+
+    /* ===== Footer ===== */
+    .footer {
+      background: var(--bg-panel);
+      border-top: 1px solid var(--border);
+      padding: 8px 24px;
+      font-size: 10px;
+      color: var(--txt-dim);
+      letter-spacing: 1px;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== TOP BAR ===== -->
+<div class="topbar">
+  <span class="topbar-brand">⚙ YANPU</span>
+  <span class="topbar-sep">|</span>
+  <span class="topbar-meta">电机音频质量检测系统</span>
+  <span class="topbar-sep">|</span>
+  <span class="topbar-meta">MODEL: 1D-CNN FUSED · SR 22050 Hz</span>
+  <div class="topbar-right">
+    <div class="led" id="sysledDot"></div>
+    <span class="topbar-status" id="sysStatus">正在连接...</span>
+  </div>
+</div>
+
+<!-- ===== MAIN ===== -->
+<div class="main">
+
+  <!-- channels -->
+  <div>
+    <div class="section-label">音频通道 · AUDIO CHANNELS</div>
+    <div class="channels">
+
+      <!-- CW_X -->
+      <div class="ch-card" id="card-cw_x">
+        <div class="ch-head">
+          <span class="ch-id">CW_X</span>
+          <span class="ch-sub">CH 1 · X AXIS</span>
+        </div>
+        <div class="dropzone" id="dz-cw_x"
+             onclick="document.getElementById('fi-cw_x').click()"
+             ondragover="dzOver(event,'cw_x')"
+             ondragleave="dzLeave('cw_x')"
+             ondrop="dzDrop(event,'cw_x')">
+          <input type="file" id="fi-cw_x" accept=".wav,.flac,.mp3"
+                 onchange="onFileInput('cw_x',this)">
+          <div class="dz-icon">📂</div>
+          <div class="dz-txt">点击或拖放<br>CW_X.wav</div>
+        </div>
+        <div class="waveform-wrap">
+          <canvas id="wv-cw_x"></canvas>
+          <div class="waveform-placeholder" id="ph-cw_x">NO SIGNAL</div>
+        </div>
+        <div class="ch-info" id="inf-cw_x">— 未加载 —</div>
+      </div>
+
+      <!-- CCW_X -->
+      <div class="ch-card" id="card-ccw_x">
+        <div class="ch-head">
+          <span class="ch-id">CCW_X</span>
+          <span class="ch-sub">CH 2 · X AXIS</span>
+        </div>
+        <div class="dropzone" id="dz-ccw_x"
+             onclick="document.getElementById('fi-ccw_x').click()"
+             ondragover="dzOver(event,'ccw_x')"
+             ondragleave="dzLeave('ccw_x')"
+             ondrop="dzDrop(event,'ccw_x')">
+          <input type="file" id="fi-ccw_x" accept=".wav,.flac,.mp3"
+                 onchange="onFileInput('ccw_x',this)">
+          <div class="dz-icon">📂</div>
+          <div class="dz-txt">点击或拖放<br>CCW_X.wav</div>
+        </div>
+        <div class="waveform-wrap">
+          <canvas id="wv-ccw_x"></canvas>
+          <div class="waveform-placeholder" id="ph-ccw_x">NO SIGNAL</div>
+        </div>
+        <div class="ch-info" id="inf-ccw_x">— 未加载 —</div>
+      </div>
+
+      <!-- CW_Z -->
+      <div class="ch-card" id="card-cw_z">
+        <div class="ch-head">
+          <span class="ch-id">CW_Z</span>
+          <span class="ch-sub">CH 3 · Z AXIS</span>
+        </div>
+        <div class="dropzone" id="dz-cw_z"
+             onclick="document.getElementById('fi-cw_z').click()"
+             ondragover="dzOver(event,'cw_z')"
+             ondragleave="dzLeave('cw_z')"
+             ondrop="dzDrop(event,'cw_z')">
+          <input type="file" id="fi-cw_z" accept=".wav,.flac,.mp3"
+                 onchange="onFileInput('cw_z',this)">
+          <div class="dz-icon">📂</div>
+          <div class="dz-txt">点击或拖放<br>CW_Z.wav</div>
+        </div>
+        <div class="waveform-wrap">
+          <canvas id="wv-cw_z"></canvas>
+          <div class="waveform-placeholder" id="ph-cw_z">NO SIGNAL</div>
+        </div>
+        <div class="ch-info" id="inf-cw_z">— 未加载 —</div>
+      </div>
+
+      <!-- CCW_Z -->
+      <div class="ch-card" id="card-ccw_z">
+        <div class="ch-head">
+          <span class="ch-id">CCW_Z</span>
+          <span class="ch-sub">CH 4 · Z AXIS</span>
+        </div>
+        <div class="dropzone" id="dz-ccw_z"
+             onclick="document.getElementById('fi-ccw_z').click()"
+             ondragover="dzOver(event,'ccw_z')"
+             ondragleave="dzLeave('ccw_z')"
+             ondrop="dzDrop(event,'ccw_z')">
+          <input type="file" id="fi-ccw_z" accept=".wav,.flac,.mp3"
+                 onchange="onFileInput('ccw_z',this)">
+          <div class="dz-icon">📂</div>
+          <div class="dz-txt">点击或拖放<br>CCW_Z.wav</div>
+        </div>
+        <div class="waveform-wrap">
+          <canvas id="wv-ccw_z"></canvas>
+          <div class="waveform-placeholder" id="ph-ccw_z">NO SIGNAL</div>
+        </div>
+        <div class="ch-info" id="inf-ccw_z">— 未加载 —</div>
+      </div>
+
+    </div><!-- /channels -->
+  </div>
+
+  <!-- bottom -->
+  <div class="bottom">
+
+    <!-- Control panel -->
+    <div class="ctrl-panel">
+      <div class="section-label">控制 · CONTROL</div>
+
+      <button class="detect-btn" id="detectBtn" onclick="runDetect()" disabled>
+        ▶ 开始检测
+      </button>
+
+      <div style="font-size:11px;color:var(--txt-dim);text-align:center" id="readyHint">
+        请加载全部 4 个音频通道
+      </div>
+
+      <table class="sys-table">
+        <tr>
+          <td>系统状态</td>
+          <td id="sysState" class="tag-warn">初始化中</td>
+        </tr>
+        <tr>
+          <td>模型</td>
+          <td id="modelState" class="tag-warn">—</td>
+        </tr>
+        <tr>
+          <td>已加载通道</td>
+          <td id="chLoaded" class="tag-dim">0 / 4</td>
+        </tr>
+        <tr>
+          <td>采样率</td>
+          <td id="srInfo" class="tag-dim">—</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Result panel -->
+    <div class="result-panel">
+      <div class="section-label">检测结果 · DETECTION RESULT</div>
+
+      <div class="result-badge idle" id="resultBadge">- - -</div>
+
+      <div class="bars" id="barsSection" style="display:none">
+        <div class="bar-row">
+          <div class="bar-meta">
+            <span>OK 概率</span>
+            <span id="okPct">0.0 %</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill ok" id="okBar" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-meta">
+            <span>NG 概率</span>
+            <span id="ngPct">0.0 %</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill ng" id="ngBar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-ts" id="resultTs"></div>
+    </div>
+
+  </div><!-- /bottom -->
+
+</div><!-- /main -->
+
+<!-- ===== FOOTER ===== -->
+<div class="footer">
+  YANPU MOTOR INSPECTION SYSTEM &nbsp;·&nbsp; 严谱电机检测平台 &nbsp;·&nbsp; 1D-CNN ACOUSTIC FAULT DETECTION
+</div>
+
+<script>
+  'use strict';
+
+  /* ---------- state ---------- */
+  const CHANNELS = ['cw_x', 'ccw_x', 'cw_z', 'ccw_z'];
+  const files = Object.fromEntries(CHANNELS.map(c => [c, null]));
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  /* ---------- init: fetch status ---------- */
+  (async () => {
+    try {
+      const r = await fetch('/api/status');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      setConnected(d.model_loaded, d.sample_rate);
+    } catch {
+      setSysLed('ng');
+      document.getElementById('sysStatus').textContent = '后端连接失败';
+      document.getElementById('sysState').textContent  = '离线';
+      document.getElementById('sysState').className    = 'tag-ng';
+    }
+  })();
+
+  function setConnected(modelLoaded, sr) {
+    setSysLed('ok');
+    document.getElementById('sysStatus').textContent = '系统就绪';
+    document.getElementById('sysState').textContent  = '就绪';
+    document.getElementById('sysState').className    = 'tag-ok';
+    document.getElementById('srInfo').textContent    = sr + ' Hz';
+    if (modelLoaded) {
+      document.getElementById('modelState').textContent = '已加载 ✓';
+      document.getElementById('modelState').className   = 'tag-ok';
+    } else {
+      document.getElementById('modelState').textContent = '演示模式 ⚠';
+      document.getElementById('modelState').className   = 'tag-warn';
+    }
+  }
+
+  function setSysLed(state) {
+    const dot = document.getElementById('sysledDot');
+    dot.style.background   = state === 'ok' ? 'var(--ok)' : state === 'ng' ? 'var(--ng)' : 'var(--warn)';
+    dot.style.boxShadow    = `0 0 6px ${state === 'ok' ? 'var(--ok)' : state === 'ng' ? 'var(--ng)' : 'var(--warn)'}`;
+  }
+
+  /* ---------- drag & drop ---------- */
+  function dzOver(e, ch) {
+    e.preventDefault();
+    document.getElementById('dz-' + ch).classList.add('over');
+  }
+  function dzLeave(ch) {
+    document.getElementById('dz-' + ch).classList.remove('over');
+  }
+  function dzDrop(e, ch) {
+    e.preventDefault();
+    dzLeave(ch);
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(ch, f);
+  }
+  function onFileInput(ch, input) {
+    if (input.files[0]) loadFile(ch, input.files[0]);
+    input.value = '';           // allow re-selection of same file
+  }
+
+  /* ---------- load & visualise ---------- */
+  function loadFile(ch, file) {
+    files[ch] = file;
+    const card = document.getElementById('card-' + ch);
+    card.classList.remove('active');
+    card.classList.add('loaded');
+
+    const kb = (file.size / 1024).toFixed(1);
+    const inf = document.getElementById('inf-' + ch);
+    inf.textContent = `${file.name}  (${kb} KB)`;
+    inf.className   = 'ch-info ready';
+
+    /* decode & draw waveform */
+    file.arrayBuffer().then(ab => {
+      getAudioCtx().decodeAudioData(ab, buf => {
+        drawWaveform(ch, buf);
+        document.getElementById('ph-' + ch).style.display = 'none';
+      }, () => {
+        /* decoding failed — show flat line */
+        drawFallback(ch);
+        document.getElementById('ph-' + ch).style.display = 'none';
+      });
+    });
+
+    updateReady();
+  }
+
+  function drawWaveform(ch, audioBuf) {
+    const canvas = document.getElementById('wv-' + ch);
+    const wrap   = canvas.parentElement;
+    const dpr    = window.devicePixelRatio || 1;
+    canvas.width  = wrap.clientWidth  * dpr;
+    canvas.height = wrap.clientHeight * dpr;
+    const ctx = canvas.getContext('2d');
+
+    const data  = audioBuf.getChannelData(0);
+    const W     = canvas.width;
+    const H     = canvas.height;
+    const step  = Math.max(1, Math.floor(data.length / W));
+    const mid   = H / 2;
+
+    ctx.clearRect(0, 0, W, H);
+
+    /* faint grid line */
+    ctx.strokeStyle = 'rgba(30,144,255,.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+
+    /* waveform */
+    ctx.strokeStyle = 'rgba(30,144,255,.85)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < W; i++) {
+      let mn = 1, mx = -1;
+      for (let j = 0; j < step; j++) {
+        const v = data[i * step + j] || 0;
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+      }
+      ctx.moveTo(i + .5, mid + mn * mid * .92);
+      ctx.lineTo(i + .5, mid + mx * mid * .92);
+    }
+    ctx.stroke();
+  }
+
+  function drawFallback(ch) {
+    const canvas = document.getElementById('wv-' + ch);
+    const wrap   = canvas.parentElement;
+    canvas.width  = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+    const ctx = canvas.getContext('2d');
+    const mid = canvas.height / 2;
+    ctx.strokeStyle = 'rgba(255,171,0,.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(canvas.width, mid); ctx.stroke();
+  }
+
+  /* ---------- ready state ---------- */
+  function updateReady() {
+    const loaded = CHANNELS.filter(c => files[c] !== null).length;
+    document.getElementById('chLoaded').textContent = loaded + ' / 4';
+    document.getElementById('chLoaded').className   = loaded === 4 ? 'tag-ok' : 'tag-dim';
+
+    const btn  = document.getElementById('detectBtn');
+    const hint = document.getElementById('readyHint');
+    if (loaded === 4) {
+      btn.disabled      = false;
+      hint.textContent  = '全部通道就绪，可开始检测 ✓';
+      hint.style.color  = 'var(--ok)';
+    } else {
+      btn.disabled      = true;
+      hint.textContent  = `请加载全部 4 个音频通道（还需 ${4 - loaded} 个）`;
+      hint.style.color  = 'var(--txt-dim)';
+    }
+  }
+
+  /* ---------- detect ---------- */
+  async function runDetect() {
+    const btn = document.getElementById('detectBtn');
+    btn.disabled  = true;
+    btn.textContent = '检测中...';
+    btn.classList.add('running');
+
+    /* reset result */
+    const badge = document.getElementById('resultBadge');
+    badge.className   = 'result-badge idle';
+    badge.textContent = '- - -';
+    document.getElementById('barsSection').style.display = 'none';
+    document.getElementById('resultTs').textContent = '';
+
+    const form = new FormData();
+    CHANNELS.forEach(c => form.append(c, files[c]));
+
+    try {
+      const resp = await fetch('/api/predict', { method: 'POST', body: form });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const d = await resp.json();
+
+      const res  = d.result;              // "OK" | "NG"
+      const okP  = (d.probabilities.OK * 100).toFixed(1);
+      const ngP  = (d.probabilities.NG * 100).toFixed(1);
+
+      badge.className   = 'result-badge ' + res.toLowerCase();
+      badge.textContent = res;
+
+      document.getElementById('okPct').textContent  = okP + ' %';
+      document.getElementById('ngPct').textContent  = ngP + ' %';
+      document.getElementById('okBar').style.width  = okP + '%';
+      document.getElementById('ngBar').style.width  = ngP + '%';
+      document.getElementById('barsSection').style.display = 'flex';
+
+      const ts = new Date().toLocaleString('zh-CN', { hour12: false });
+      const demo = d.model_loaded ? '' : '  [演示模式]';
+      document.getElementById('resultTs').textContent = '检测时间: ' + ts + demo;
+
+    } catch (err) {
+      badge.className   = 'result-badge idle';
+      badge.textContent = 'ERR';
+      document.getElementById('resultTs').textContent = '请求失败: ' + err.message;
+    } finally {
+      btn.disabled  = false;
+      btn.textContent = '▶ 开始检测';
+      btn.classList.remove('running');
+    }
+  }
+</script>
+</body>
+</html>
