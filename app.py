@@ -1,21 +1,16 @@
 import io
-import logging
 import os
-import random
-
+import numpy as np
 import torch
-import torchaudio
 from fastapi import FastAPI, UploadFile, File
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-logger = logging.getLogger(__name__)
-
-from model import FusedMotorClassifier
 from config import CONFIG
+from model import Accel1DCNN
 
-app = FastAPI(title="电机音频质量检测系统")
+app = FastAPI(title="加速度序列 OK/NG 检测系统")
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,102 +19,82 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --------------- 模型加载 ---------------
 device = torch.device("cpu")
-model = FusedMotorClassifier()
-model_loaded = False
-
+model = Accel1DCNN(in_ch=CONFIG["CHANNELS"], num_classes=2)
 model_path = CONFIG["MODEL_SAVE_PATH"]
-if os.path.exists(model_path):
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
-    model_loaded = True
-    print(f"✅ 模型加载成功: {model_path}")
-else:
-    print(f"⚠️  未找到模型文件 ({model_path})，将使用演示模式")
 
+model_loaded = False
+if os.path.exists(model_path):
+    sd = torch.load(model_path, map_location=device)
+    model.load_state_dict(sd)
+    model_loaded = True
 model.eval()
 
 
-# --------------- 辅助函数 ---------------
+def _downsample_to_2w(X: np.ndarray, target_len: int = 20000) -> np.ndarray:
+    # X: (T,3)
+    T = X.shape[0]
+    if T == target_len:
+        return X
+    if T > target_len:
+        idx = np.linspace(0, T - 1, target_len).round().astype(np.int64)
+        idx = np.unique(idx)
+        if len(idx) < target_len:
+            missing = target_len - len(idx)
+            extra = np.setdiff1d(np.arange(T), idx)
+            extra_pick = np.linspace(0, len(extra) - 1, missing).round().astype(np.int64)
+            idx = np.sort(np.concatenate([idx, extra[extra_pick]]))
+        return X[idx]
+    pad = np.zeros((target_len - T, X.shape[1]), dtype=X.dtype)
+    return np.concatenate([X, pad], axis=0)
 
-def _load_audio_from_bytes(data: bytes, target_len: int) -> torch.Tensor:
-    """从字节流加载音频，转单声道，重采样，截断/补零到 target_len。"""
-    try:
-        buf = io.BytesIO(data)
-        wf, sr = torchaudio.load(buf)
-        # 多声道 → 单声道
-        wf = torch.mean(wf, dim=0, keepdim=True)
-        # 采样率不匹配时重采样
-        if sr != CONFIG["SAMPLE_RATE"]:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=CONFIG["SAMPLE_RATE"])
-            wf = resampler(wf)
-        # 截断或补零
-        cur = wf.shape[1]
-        if cur >= target_len:
-            return wf[:, :target_len]
-        return torch.nn.functional.pad(wf, (0, target_len - cur))
-    except Exception as e:
-        logger.warning("Failed to load audio: %s", e)
-        return torch.zeros(1, target_len)
-
-
-# --------------- API 路由 ---------------
 
 @app.get("/api/status")
-async def get_status():
+async def status():
     return JSONResponse({
         "model_loaded": model_loaded,
         "model_path": model_path,
-        "sample_rate": CONFIG["SAMPLE_RATE"],
-        "len_cw": CONFIG["LEN_CW"],
-        "len_ccw": CONFIG["LEN_CCW"],
+        "channels": CONFIG["CHANNELS"],
+        "target_len": CONFIG["TARGET_LEN"],
+        "labels": {"OK": 0, "NG": 1},
     })
 
 
-@app.post("/api/predict")
-async def predict(
-    cw_x:  UploadFile = File(..., description="CW方向 X轴音频"),
-    ccw_x: UploadFile = File(..., description="CCW方向 X轴音频"),
-    cw_z:  UploadFile = File(..., description="CW方向 Z轴音频"),
-    ccw_z: UploadFile = File(..., description="CCW方向 Z轴音频"),
-):
-    cw_x_bytes  = await cw_x.read()
-    ccw_x_bytes = await ccw_x.read()
-    cw_z_bytes  = await cw_z.read()
-    ccw_z_bytes = await ccw_z.read()
+@app.post("/api/predict_npz")
+async def predict_npz(file: UploadFile = File(..., description="上传单个样本 npz（包含 X: (T,3)）")):
+    data = await file.read()
+    buf = io.BytesIO(data)
+    try:
+        npz = np.load(buf, allow_pickle=False)
+        if "X" not in npz:
+            return JSONResponse({"error": "npz 中缺少 X"}, status_code=400)
+        X = npz["X"]
+        if X.ndim != 2 or X.shape[1] != CONFIG["CHANNELS"]:
+            return JSONResponse({"error": f"X shape 不正确: {X.shape}"}, status_code=400)
 
-    cw_x_t  = _load_audio_from_bytes(cw_x_bytes,  CONFIG["LEN_CW"])
-    ccw_x_t = _load_audio_from_bytes(ccw_x_bytes, CONFIG["LEN_CCW"])
-    cw_z_t  = _load_audio_from_bytes(cw_z_bytes,  CONFIG["LEN_CW"])
-    ccw_z_t = _load_audio_from_bytes(ccw_z_bytes, CONFIG["LEN_CCW"])
+        X = _downsample_to_2w(X.astype(np.float32), CONFIG["TARGET_LEN"])  # (20000,3)
+        X_t = torch.from_numpy(X.T).unsqueeze(0)  # (1,3,20000)
 
-    # (1, LEN_CW+LEN_CCW) × 2 → (1, 2, TOTAL_LEN)
-    full_x = torch.cat([cw_x_t,  ccw_x_t], dim=1)
-    full_z = torch.cat([cw_z_t,  ccw_z_t], dim=1)
-    tensor  = torch.cat([full_x, full_z], dim=0).unsqueeze(0)  # (1,2,TOTAL_LEN)
+        if not model_loaded:
+            return JSONResponse({"error": "模型未加载，请先训练生成 best_model.pth"}, status_code=500)
 
-    if model_loaded:
         with torch.no_grad():
-            logits = model(tensor.to(device))
-            probs  = torch.softmax(logits, dim=1).squeeze()
-            pred   = int(torch.argmax(probs).item())
-            ok_p   = float(probs[0])
-            ng_p   = float(probs[1])
-    else:
-        # 演示模式：模拟随机结果
-        pred = random.randint(0, 1)
-        ok_p = round(random.uniform(0.6, 0.95), 4) if pred == 0 else round(random.uniform(0.05, 0.4), 4)
-        ng_p = round(1.0 - ok_p, 4)
+            logits = model(X_t.to(device))
+            probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+            pred = int(np.argmax(probs))
+            ok_p = float(probs[0])
+            ng_p = float(probs[1])
 
-    result = "NG" if pred == 1 else "OK"
-
-    return JSONResponse({
-        "result": result,
-        "confidence": ng_p if pred == 1 else ok_p,
-        "probabilities": {"OK": ok_p, "NG": ng_p},
-        "model_loaded": model_loaded,
-    })
+        return JSONResponse({
+            "result": "NG" if pred == 1 else "OK",
+            "pred": pred,
+            "probabilities": {"OK": ok_p, "NG": ng_p},
+            "confidence": ng_p if pred == 1 else ok_p,
+            "model_loaded": model_loaded
+        })
+    except Exception as e:
+        return JSONResponse({"error": f"解析/预测失败: {e}"}, status_code=400)
 
 
-# --------------- 静态文件（前端） ---------------
+# 静态前端
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

@@ -1,51 +1,51 @@
 import torch
 import torch.nn as nn
 
-class FusedMotorClassifier(nn.Module):
-    def __init__(self, input_channels=2, num_classes=2):
-        super(FusedMotorClassifier, self).__init__()
-        
-        # 特征提取器
-        self.features = nn.Sequential(
-            # 输入: (B, 2, TOTAL_LEN)
-            # Layer 1: 大步长快速降维
-            nn.Conv1d(input_channels, 16, kernel_size=64, stride=4, padding=30),
-            nn.BatchNorm1d(16),
-            nn.ReLU(),
-            nn.MaxPool1d(4), 
-            
-            # Layer 2
-            nn.Conv1d(16, 32, kernel_size=32, stride=2, padding=15),
+
+class Accel1DCNN(nn.Module):
+    """
+    可变长度输入: (B, C, T)
+    输出: (B, 2)
+    """
+    def __init__(self, in_ch=3, num_classes=2):
+        super().__init__()
+
+        self.stem = nn.Sequential(
+            nn.Conv1d(in_ch, 32, kernel_size=15, stride=2, padding=7),
             nn.BatchNorm1d(32),
             nn.ReLU(),
-            nn.MaxPool1d(4),
-            
-            # Layer 3
-            nn.Conv1d(32, 64, kernel_size=16, stride=2, padding=7),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.MaxPool1d(4),
-            
-            # Layer 4
-            nn.Conv1d(64, 128, kernel_size=8, stride=1, padding=3),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            
-            # Global Average Pooling
-            # 将任意长度的时间轴压缩为 1 个点: (B, 128, T) -> (B, 128, 1)
-            nn.AdaptiveAvgPool1d(1) 
+            nn.MaxPool1d(kernel_size=2),  # 比原来4更温和
         )
-        
-        # 分类头
-        self.classifier = nn.Sequential(
-            nn.Flatten(), # (B, 128)
+
+        # dilated conv blocks（保留分辨率，提高感受野）
+        def block(cin, cout, k, d):
+            pad = (k // 2) * d
+            return nn.Sequential(
+                nn.Conv1d(cin, cout, kernel_size=k, stride=1, padding=pad, dilation=d),
+                nn.BatchNorm1d(cout),
+                nn.ReLU()
+            )
+
+        self.features = nn.Sequential(
+            block(32, 64, 9, d=1),
+            block(64, 64, 9, d=2),
+            block(64, 128, 7, d=4),
+            block(128, 128, 7, d=8),
+        )
+
+        self.pool = nn.AdaptiveAvgPool1d(1)
+
+        self.head = nn.Sequential(
+            nn.Flatten(),          # (B,128)
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Dropout(0.5), # 防止过拟合
+            nn.Dropout(0.3),
             nn.Linear(64, num_classes)
         )
 
     def forward(self, x):
+        x = self.stem(x)
         x = self.features(x)
-        x = self.classifier(x)
+        x = self.pool(x)
+        x = self.head(x)
         return x

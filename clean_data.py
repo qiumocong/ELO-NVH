@@ -1,148 +1,190 @@
 import os
-import shutil
+import re
 import pandas as pd
-import torchaudio
-import concurrent.futures
-from pathlib import Path
-from tqdm import tqdm
 
-# ================= 配置区域 =================
-# 数据集根目录 (处理后的数据目录)
-DATA_ROOT = Path("/media/qmc/新加卷/DATA_Processed_All")
-# 标签文件路径
-CSV_PATH = DATA_ROOT / "labels.csv"
-# 清洗后的标签文件保存路径
-CLEANED_CSV_PATH = DATA_ROOT / "labels_cleaned.csv"
+OK_DIR = r"D:\qmc\PycharmProjects\yanpu\data\01-原始excel文件\OK"
+NG_DIR = r"D:\qmc\PycharmProjects\yanpu\data\01-原始excel文件\NG"
+OUT_ROOT = r"D:\qmc\PycharmProjects\yanpu\data\02-转换csv"
 
-# 必须存在的4个文件
-REQUIRED_FILES = ['CW_X.wav', 'CW_Z.wav', 'CCW_X.wav', 'CCW_Z.wav']
-# ===========================================
+META_KEYS = {
+    "first_row": re.compile(r"^\s*first\s*row\s*:\s*$", re.IGNORECASE),
+    "data_rows": re.compile(r"^\s*data\s*rows\s*:\s*$", re.IGNORECASE),
+    "data_cols": re.compile(r"^\s*data\s*cols\s*:\s*$", re.IGNORECASE),
+}
 
-def get_audio_len(file_path):
-    """只读取元数据获取长度，不加载音频，速度极快"""
+T_CELL_PAT = re.compile(r"^\s*t\s*$", re.IGNORECASE)
+XYZ_CELL_PAT = re.compile(r"^\s*\d*\s*([xyz])\s*$", re.IGNORECASE)
+
+
+def norm(s) -> str:
+    s = "" if s is None else str(s)
+    return s.strip().lower().replace("\u00a0", " ")
+
+
+def to_int(v):
+    if v is None:
+        return None
     try:
-        metadata = torchaudio.info(str(file_path))
-        return metadata.num_frames
+        # excel 里可能是 float
+        return int(float(str(v).strip()))
     except Exception:
-        return 0
+        return None
 
-def process_row(row_data):
-    """处理单行数据的函数，用于多线程"""
-    index, row = row_data
-    
-    # 构建实际的文件夹路径: DATA_ROOT / NG / folder_name
-    # 注意：这里我们信任 CSV 的 label 列来定位文件夹
-    folder_path = DATA_ROOT / row['label'] / row['folder_name']
-    
-    # 1. 检查文件夹是否存在
-    if not folder_path.exists():
-        return index, "missing_folder", 0, 0, None
 
-    # 2. 检查4个文件是否齐全
-    for fname in REQUIRED_FILES:
-        if not (folder_path / fname).exists():
-            return index, "missing_files", 0, 0, folder_path
+def is_number(x) -> bool:
+    try:
+        if x is None:
+            return False
+        float(x)
+        return True
+    except Exception:
+        return False
 
-    # 3. 如果齐全，获取 CW_X 和 CCW_X 的长度
-    # 我们只关心 X 轴长度，因为 Z 轴通常是同步录制的，长度一致
-    len_cw = get_audio_len(folder_path / 'CW_X.wav')
-    len_ccw = get_audio_len(folder_path / 'CCW_X.wav')
 
-    # 再次检查：如果文件存在但长度为0（损坏的文件），也视为无效
-    if len_cw == 0 or len_ccw == 0:
-        return index, "corrupt_files", 0, 0, folder_path
+def find_meta(raw: pd.DataFrame):
+    """
+    在前200行内找到 First row / Data rows / Data cols 对应的值。
+    这些值通常在 key 单元格右侧紧邻的单元格中。
+    """
+    max_r = min(200, len(raw))
+    max_c = min(30, raw.shape[1])
 
-    return index, "valid", len_cw, len_ccw, None
+    meta = {"first_row": None, "data_rows": None, "data_cols": None}
+
+    for r in range(max_r):
+        for c in range(max_c):
+            v = norm(raw.iat[r, c])
+            if not v:
+                continue
+
+            for k, pat in META_KEYS.items():
+                if pat.match(v):
+                    # 值一般在右侧第1列（如果为空再往右找几格）
+                    val = None
+                    for cc in range(c + 1, min(c + 6, max_c)):
+                        cand = raw.iat[r, cc]
+                        val = to_int(cand)
+                        if val is not None:
+                            break
+                    meta[k] = val
+
+    if meta["first_row"] is None or meta["data_rows"] is None or meta["data_cols"] is None:
+        raise ValueError(f"元信息未找全：{meta}（找不到 First row/Data rows/Data cols）")
+
+    return meta
+
+
+def find_xyz_header_row(raw: pd.DataFrame):
+    """
+    找到包含 x/y/z 的表头行（如：空, 244484 x, 244484 y, 244484 z）
+    返回 (row_index, col_x, col_y, col_z)
+    """
+    max_scan_rows = min(200, len(raw))
+    max_scan_cols = min(50, raw.shape[1])
+
+    for r in range(max_scan_rows):
+        row = [norm(raw.iat[r, c]) for c in range(max_scan_cols)]
+        found = {}
+        for c, v in enumerate(row):
+            if not v:
+                continue
+            m = XYZ_CELL_PAT.match(v)
+            if m:
+                axis = m.group(1).lower()
+                if axis not in found:
+                    found[axis] = c
+        if all(k in found for k in ("x", "y", "z")):
+            return r, found["x"], found["y"], found["z"]
+
+    raise ValueError("未找到 xyz 表头行（... x / ... y / ... z）。")
+
+
+def find_time_col_nearby(raw: pd.DataFrame, start_row: int):
+    """
+    从 xyz 表头行往上找最近的 't'，返回列号
+    """
+    max_scan_cols = min(50, raw.shape[1])
+    for r in range(start_row, max(-1, start_row - 30), -1):
+        for c in range(max_scan_cols):
+            v = norm(raw.iat[r, c])
+            if v and T_CELL_PAT.match(v):
+                return c
+    raise ValueError("在 xyz 表头行上方未找到 't'，无法确定时间列。")
+
+
+def extract_one_excel(xls_path: str, sheet_name=0) -> pd.DataFrame:
+    raw = pd.read_excel(xls_path, sheet_name=sheet_name, header=None, engine="openpyxl")
+
+    meta = find_meta(raw)
+    first_row = meta["first_row"]          # 例如 15（Excel行号，通常从1开始）
+    data_rows_expected = meta["data_rows"] # 例如 1047576
+    data_cols_expected = meta["data_cols"] # 例如 3（xyz）
+
+    xyz_row, c_x, c_y, c_z = find_xyz_header_row(raw)
+    c_t = find_time_col_nearby(raw, xyz_row)
+
+    # 以 meta 的 first_row 为准：转成 DataFrame 的 0-based index
+    data_start = first_row - 1  # 如果 first_row=15，则iloc从14开始
+    if data_start < 0 or data_start >= len(raw):
+        raise ValueError(f"first_row={first_row} 不在表格有效范围内。")
+
+    # 读取 data_rows_expected 行（允许实际不足）
+    data_end = min(len(raw), data_start + data_rows_expected)
+
+    df = raw.iloc[data_start:data_end, [c_t, c_x, c_y, c_z]].copy()
+    df.columns = ["time", "ax", "ay", "az"]
+
+    # 基础清理
+    df = df.dropna(how="all")
+    df = df[df["time"].apply(is_number)]
+
+    for col in ["time", "ax", "ay", "az"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["time", "ax", "ay", "az"]).reset_index(drop=True)
+
+    # 校验：xyz 列数
+    if data_cols_expected != 3:
+        raise ValueError(f"Data cols 期望为3（xyz），但读到 meta: {data_cols_expected}")
+
+    # 校验：行数（允许略少，比如尾部有空行/被过滤）
+    # 这里给一个较宽松的阈值：至少达到期望的 95%
+    if len(df) < int(0.95 * data_rows_expected):
+        raise ValueError(f"数据行数不足：期望≈{data_rows_expected}，实际={len(df)}（过滤后）")
+
+    return df
+
+
+def convert_dir(src_dir: str, label: str):
+    out_dir = os.path.join(OUT_ROOT, label)
+    os.makedirs(out_dir, exist_ok=True)
+
+    excel_files = []
+    for root, _, files in os.walk(src_dir):
+        for fn in files:
+            if fn.lower().endswith((".xlsx", ".xls")):
+                excel_files.append(os.path.join(root, fn))
+
+    print(f"[{label}] files={len(excel_files)}")
+
+    for path in excel_files:
+        base = os.path.splitext(os.path.basename(path))[0]
+        out_csv = os.path.join(out_dir, base + ".csv")
+        if os.path.exists(out_csv):
+            print(f"  SKIP {os.path.basename(path)} -> {out_csv} 已存在")
+            continue
+        try:
+            df = extract_one_excel(path, sheet_name=0)
+            df.to_csv(out_csv, index=False, encoding="utf-8-sig")
+            print(f"  OK  {os.path.basename(path)} rows={len(df)} -> {out_csv}")
+        except Exception as e:
+            print(f"  FAIL {os.path.basename(path)}: {e}")
+
 
 def main():
-    print(f"正在读取标签文件: {CSV_PATH}")
-    df = pd.read_csv(CSV_PATH)
-    original_count = len(df)
-    
-    print(f"总数据量: {original_count}")
-    print("开始扫描与清洗 (这可能需要几分钟)...")
+    # convert_dir(OK_DIR, "OK")
+    convert_dir(NG_DIR, "NG")
+    print("完成")
 
-    # 准备任务
-    tasks = [(idx, row) for idx, row in df.iterrows()]
-    
-    valid_indices = []
-    cw_lengths = []
-    ccw_lengths = []
-    deleted_folders = 0
-    
-    # 结果存储字典，用于按索引回填
-    results = {}
-
-    # 使用多线程加速 IO 操作
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
-        futures = {executor.submit(process_row, task): task[0] for task in tasks}
-        
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(tasks), desc="Processing"):
-            idx, status, len_cw, len_ccw, path_to_delete = future.result()
-            results[idx] = (status, len_cw, len_ccw)
-            
-            # 如果判定为无效，执行物理删除
-            if status in ["missing_files", "corrupt_files"] and path_to_delete:
-                try:
-                    # 递归删除文件夹
-                    shutil.rmtree(path_to_delete)
-                    # print(f"已删除无效数据: {path_to_delete}") # 如果想看刷屏可以取消注释
-                    deleted_folders += 1
-                except Exception as e:
-                    print(f"删除失败 {path_to_delete}: {e}")
-
-    # --- 整理数据 ---
-    print("\n正在更新 DataFrame...")
-    
-    # 按照原始 DataFrame 的顺序重组数据
-    keep_mask = []
-    list_len_cw = []
-    list_len_ccw = []
-    
-    for idx in df.index:
-        status, len_cw, len_ccw = results[idx]
-        if status == "valid":
-            keep_mask.append(True)
-            list_len_cw.append(len_cw)
-            list_len_ccw.append(len_ccw)
-        else:
-            keep_mask.append(False)
-
-    # 筛选有效行
-    df_clean = df[keep_mask].copy()
-    
-    # 添加新列
-    df_clean['len_cw'] = list_len_cw
-    df_clean['len_ccw'] = list_len_ccw
-
-    # 保存新的 CSV
-    df_clean.to_csv(CLEANED_CSV_PATH, index=False, encoding='utf-8-sig')
-
-    # --- 统计报告 ---
-    max_cw = df_clean['len_cw'].max()
-    max_ccw = df_clean['len_ccw'].max()
-    
-    print("=" * 40)
-    print("清洗完成报告")
-    print("=" * 40)
-    print(f"原始数量: {original_count}")
-    print(f"剩余数量: {len(df_clean)}")
-    print(f"已删除/无效数量: {original_count - len(df_clean)}")
-    print(f"物理删除文件夹数: {deleted_folders}")
-    print("-" * 40)
-    print(f"CW_X 最大长度:  {max_cw} (约 {max_cw/22050:.2f} 秒)")
-    print(f"CCW_X 最大长度: {max_ccw} (约 {max_ccw/22050:.2f} 秒)")
-    print("-" * 40)
-    print(f"新的标签文件已保存至: {CLEANED_CSV_PATH}")
-    print("\n*** 请根据以上最大长度更新 main.py 中的 CONFIG ***")
-    print(f"建议设置 LEN_CW  = {int(max_cw * 1.02)}") # 留2%余量
-    print(f"建议设置 LEN_CCW = {int(max_ccw * 1.02)}")
 
 if __name__ == "__main__":
-    # 二次确认，防止误删
-    print(f"警告: 此脚本将【永久删除】 {DATA_ROOT} 下不完整的数据文件夹。")
-    x = input("输入 'yes' 继续，其他键退出: ")
-    if x.lower() == 'yes':
-        main()
-    else:
-        print("已取消。")
+    main()
