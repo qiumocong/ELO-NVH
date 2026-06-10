@@ -11,6 +11,9 @@ from matplotlib.figure import Figure
 from app.runtime_config import load_runtime_config
 
 
+UI_FONT_FAMILY = "Segoe UI"
+
+
 class DetectionDesktopApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -35,13 +38,13 @@ class DetectionDesktopApp:
         if "clam" in style.theme_names():
             style.theme_use("clam")
         style.configure("Card.TLabelframe", background="#FFFFFF")
-        style.configure("Card.TLabelframe.Label", font=("Segoe UI", 11, "bold"))
+        style.configure("Card.TLabelframe.Label", font=(UI_FONT_FAMILY, 11, "bold"))
         style.configure("TFrame", background="#F3F5F9")
-        style.configure("TLabel", background="#F3F5F9", font=("Segoe UI", 10))
-        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"))
-        style.configure("Value.TLabel", font=("Segoe UI", 11))
-        style.configure("TButton", font=("Segoe UI", 10), padding=6)
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=8)
+        style.configure("TLabel", background="#F3F5F9", font=(UI_FONT_FAMILY, 10))
+        style.configure("Title.TLabel", font=(UI_FONT_FAMILY, 16, "bold"))
+        style.configure("Value.TLabel", font=(UI_FONT_FAMILY, 11))
+        style.configure("TButton", font=(UI_FONT_FAMILY, 10), padding=6)
+        style.configure("Accent.TButton", font=(UI_FONT_FAMILY, 10, "bold"), padding=8)
         style.configure("TEntry", padding=5)
 
     def _build_layout(self):
@@ -54,10 +57,10 @@ class DetectionDesktopApp:
         ctrl_frame.pack(fill=tk.X)
         ctrl_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(ctrl_frame, text="PLC 指令").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(ctrl_frame, text="PLC指令").grid(row=0, column=0, sticky=tk.W)
         ttk.Entry(ctrl_frame, textvariable=self.command_var, width=28).grid(row=0, column=1, sticky=tk.W, padx=8)
 
-        ttk.Label(ctrl_frame, text="Excel/CSV 文件").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Label(ctrl_frame, text="Excel/CSV文件").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
         ttk.Entry(ctrl_frame, textvariable=self.excel_path_var).grid(
             row=1, column=1, sticky=tk.EW, padx=8, pady=(8, 0)
         )

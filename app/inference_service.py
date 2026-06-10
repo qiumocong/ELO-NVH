@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -12,6 +13,9 @@ from model import Accel1DCNN
 
 class InferenceError(RuntimeError):
     pass
+
+
+MIN_VALID_ROW_RATIO = 0.95
 
 
 @dataclass
@@ -55,8 +59,10 @@ class InferenceService:
         if len(idx) < target_rows:
             missing = target_rows - len(idx)
             extra = np.setdiff1d(np.arange(n), idx)
-            extra_pick = np.linspace(0, len(extra) - 1, missing).round().astype(int)
-            idx = np.sort(np.concatenate([idx, extra[extra_pick]]))
+            if len(extra) > 0:
+                pick_count = min(missing, len(extra))
+                extra_pick = np.linspace(0, len(extra) - 1, pick_count).round().astype(int)
+                idx = np.sort(np.concatenate([idx, extra[extra_pick]]))
 
         return df.iloc[idx].reset_index(drop=True)
 
@@ -138,7 +144,9 @@ class InferenceService:
             raise InferenceError("Failed to locate xyz header row in Excel")
 
         t_col = None
-        for r in range(xyz_row, max(-1, xyz_row - 30), -1):
+        lower_bound = max(0, xyz_row - 30)
+        search_start = min(xyz_row, max_scan_rows - 1)
+        for r in range(search_start, lower_bound - 1, -1):
             for c in range(max_scan_cols):
                 if norm(raw.iat[r, c]) == "t":
                     t_col = c
@@ -151,6 +159,8 @@ class InferenceService:
         data_start = int(meta["first_row"]) - 1
         if data_start < 0 or data_start >= len(raw):
             raise InferenceError(f"Invalid first_row in Excel metadata: {meta['first_row']}")
+        if int(meta["data_cols"]) != 3:
+            raise InferenceError(f"Expected Data cols=3 in Excel metadata, got {meta['data_cols']}")
         data_end = min(len(raw), data_start + int(meta["data_rows"]))
 
         out_df = raw.iloc[data_start:data_end, [t_col, xyz_cols["x"], xyz_cols["y"], xyz_cols["z"]]].copy()
@@ -159,9 +169,8 @@ class InferenceService:
             out_df[col] = pd.to_numeric(out_df[col], errors="coerce")
         out_df = out_df.dropna(subset=["time", "ax", "ay", "az"]).reset_index(drop=True)
 
-        if int(meta["data_cols"]) != 3:
-            raise InferenceError(f"Expected Data cols=3 in Excel metadata, got {meta['data_cols']}")
-        if len(out_df) < int(0.95 * int(meta["data_rows"])):
+        min_valid_rows = math.ceil(MIN_VALID_ROW_RATIO * meta["data_rows"])
+        if len(out_df) < min_valid_rows:
             raise InferenceError(
                 f"Too few valid rows after Excel cleaning: expected≈{meta['data_rows']}, got={len(out_df)}"
             )
