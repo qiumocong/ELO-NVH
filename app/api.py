@@ -45,4 +45,11 @@ def health():
 @app.post("/detect")
 def detect(payload: DetectRequest):
     excel_path = Path(payload.excel_path) if payload.excel_path else runtime_config.excel_path
-    return detection_service.run_detection(command=payload.command, excel_path=excel_path)
+    try:
+        return detection_service.run_detection(command=payload.command, excel_path=excel_path)
+    except Exception:
+        return {
+            "ok": False,
+            "error_code": "INTERNAL_ERROR",
+            "message": "Unexpected server error",
+        }

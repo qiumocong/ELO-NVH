@@ -36,7 +36,7 @@
 ### 1) 启动后端
 
 ```bash
-python /home/runner/work/yanpu/yanpu/qiumocong/yanpu/run_backend.py
+python run_backend.py
 ```
 
 后端接口：
@@ -49,14 +49,14 @@ python /home/runner/work/yanpu/yanpu/qiumocong/yanpu/run_backend.py
 ```json
 {
   "command": "START_DETECT",
-  "excel_path": "/home/runner/work/yanpu/yanpu/qiumocong/yanpu/data/latest.xlsx"
+  "excel_path": "data/latest.xlsx"
 }
 ```
 
 ### 2) 启动前端
 
 ```bash
-python /home/runner/work/yanpu/yanpu/qiumocong/yanpu/run_frontend.py
+python run_frontend.py
 ```
 
 前端包含：
@@ -69,7 +69,7 @@ python /home/runner/work/yanpu/yanpu/qiumocong/yanpu/run_frontend.py
 ## 打包为 exe（示例）
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --name yanpu_frontend /home/runner/work/yanpu/yanpu/qiumocong/yanpu/run_frontend.py
+pyinstaller --noconfirm --onefile --windowed --name yanpu_frontend run_frontend.py
 ```
 
 后端可单独打包或以 Python 服务方式部署。
