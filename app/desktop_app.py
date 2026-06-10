@@ -103,11 +103,15 @@ class DetectionDesktopApp:
         label = det["label"]
         confidence = det["confidence"]
         ts = result.get("timestamp", datetime.now().isoformat())
+        try:
+            ts_display = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            ts_display = ts
 
         self.status_var.set("检测完成")
         self.result_var.set(f"结果：{label}")
         self.confidence_var.set(f"置信度：{confidence * 100:.2f}%")
-        self.time_var.set(f"时间：{ts}")
+        self.time_var.set(f"时间：{ts_display}")
 
         self.ax.clear()
         self.ax.plot(waveform["time"], waveform["ax"], label="ax", linewidth=1)

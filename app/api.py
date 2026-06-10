@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.inference_service import InferenceService
@@ -50,8 +50,11 @@ def detect(payload: DetectRequest):
         return detection_service.run_detection(command=payload.command, excel_path=excel_path)
     except Exception:
         logging.exception("Unexpected error in /detect")
-        return {
-            "ok": False,
-            "error_code": "INTERNAL_ERROR",
-            "message": "Unexpected server error",
-        }
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "ok": False,
+                "error_code": "INTERNAL_ERROR",
+                "message": "Unexpected server error",
+            },
+        )
