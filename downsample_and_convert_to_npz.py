@@ -7,10 +7,10 @@ import pandas as pd
 # CSV_ROOT/
 #   OK/*.csv
 #   NG/*.csv
-CSV_ROOT = r"D:\qmc\PycharmProjects\yanpu\data\02-转换csv"
+CSV_ROOT = r".\data\02-转换csv"
 
 # 新的训练数据输出目录
-OUT_ROOT = r"D:\qmc\PycharmProjects\yanpu\data\04-train_data_npz"
+OUT_ROOT = r".\data\04-train_data_npz"
 
 TARGET_ROWS = 100000
 

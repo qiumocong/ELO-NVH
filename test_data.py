@@ -46,7 +46,7 @@ if __name__ == "__main__":
     true_labels = []  # 存储真实标签
     pred_labels = []  # 存储预测标签
 
-    for root, _, files in os.walk(r"D:\qmc\PycharmProjects\yanpu\data\02-转换csv\test_data\NG"):
+    for root, _, files in os.walk(r".\data\02-转换csv\test_data\NG"):
         for file in files:
             if file.endswith(".csv"):
                 csv_file = os.path.join(root, file)

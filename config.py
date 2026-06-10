@@ -6,7 +6,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 CONFIG = {
     # CSV 数据根目录（按你的实际路径改）
-    "CSV_ROOT": r"D:\qmc\PycharmProjects\yanpu\data\02-转换csv",
+    "CSV_ROOT": r"D:\CodeProject\PycharmProject\yanpu\data\02-转换csv",
     "OK_DIRNAME": "OK",
     "NG_DIRNAME": "NG",
 
