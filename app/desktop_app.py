@@ -106,7 +106,7 @@ class DetectionDesktopApp:
 
         self.status_var.set("检测完成")
         self.result_var.set(f"结果：{label}")
-        self.confidence_var.set(f"置信度：{confidence*100:.2f}%")
+        self.confidence_var.set(f"置信度：{confidence * 100:.2f}%")
         self.time_var.set(f"时间：{ts}")
 
         self.ax.clear()

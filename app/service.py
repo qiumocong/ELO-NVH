@@ -14,8 +14,6 @@ class DetectionService:
         self.default_excel_path = default_excel_path
 
     def run_detection(self, command: str, excel_path: Optional[Path] = None) -> Dict:
-        now = datetime.now(timezone.utc).isoformat()
-
         try:
             plc_result = self.plc_client.send_command(command)
         except PlcError:
@@ -24,7 +22,7 @@ class DetectionService:
                 "ok": False,
                 "error_code": "PLC_ERROR",
                 "message": "PLC communication failed",
-                "timestamp": now,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         try:
@@ -35,13 +33,13 @@ class DetectionService:
                 "ok": False,
                 "error_code": "INFERENCE_ERROR",
                 "message": "Inference failed",
-                "timestamp": now,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "plc": plc_result.__dict__,
             }
 
         return {
             "ok": True,
-            "timestamp": now,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "plc": plc_result.__dict__,
             "result": {
                 "label": result.result_label,
