@@ -1,7 +1,7 @@
 [project]
 name = "yanpu"
 version = "0.1.0"
-description = "Add your description here"
+description = "Vibration noise detection with PLC trigger, backend API and desktop frontend."
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
@@ -16,3 +16,7 @@ dependencies = [
     "tqdm>=4.67.3",
     "uvicorn[standard]>=0.33.0",
 ]
+
+[project.scripts]
+yanpu-backend = "run_backend:main"
+yanpu-frontend = "app.desktop_app:main"
