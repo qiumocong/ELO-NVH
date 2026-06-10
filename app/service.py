@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -17,21 +18,23 @@ class DetectionService:
 
         try:
             plc_result = self.plc_client.send_command(command)
-        except PlcError as exc:
+        except PlcError:
+            logging.exception("PLC communication failed")
             return {
                 "ok": False,
                 "error_code": "PLC_ERROR",
-                "message": str(exc),
+                "message": "PLC communication failed",
                 "timestamp": now,
             }
 
         try:
             result = self.inference_service.predict(excel_path or self.default_excel_path)
-        except InferenceError as exc:
+        except InferenceError:
+            logging.exception("Inference failed")
             return {
                 "ok": False,
                 "error_code": "INFERENCE_ERROR",
-                "message": str(exc),
+                "message": "Inference failed",
                 "timestamp": now,
                 "plc": plc_result.__dict__,
             }

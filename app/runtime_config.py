@@ -12,6 +12,7 @@ class RuntimeConfig:
     excel_path: Path
     backend_host: str
     backend_port: int
+    backend_request_timeout_sec: float
     plc_mode: str
     plc_host: str
     plc_port: int
@@ -25,10 +26,10 @@ def load_runtime_config() -> RuntimeConfig:
         excel_path=Path(os.getenv("YANPU_EXCEL_PATH", str(PROJECT_ROOT / "data" / "latest.xlsx"))),
         backend_host=os.getenv("YANPU_BACKEND_HOST", "127.0.0.1"),
         backend_port=int(os.getenv("YANPU_BACKEND_PORT", "8000")),
+        backend_request_timeout_sec=float(os.getenv("YANPU_BACKEND_REQUEST_TIMEOUT_SEC", "30")),
         plc_mode=os.getenv("YANPU_PLC_MODE", "mock").lower(),
         plc_host=os.getenv("YANPU_PLC_HOST", "127.0.0.1"),
         plc_port=int(os.getenv("YANPU_PLC_PORT", "5020")),
         plc_timeout_sec=float(os.getenv("YANPU_PLC_TIMEOUT_SEC", "2.0")),
         plc_read_response=os.getenv("YANPU_PLC_READ_RESPONSE", "1") == "1",
     )
-

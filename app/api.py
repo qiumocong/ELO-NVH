@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,7 @@ def detect(payload: DetectRequest):
     try:
         return detection_service.run_detection(command=payload.command, excel_path=excel_path)
     except Exception:
+        logging.exception("Unexpected error in /detect")
         return {
             "ok": False,
             "error_code": "INTERNAL_ERROR",

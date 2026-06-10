@@ -25,6 +25,7 @@
 - `YANPU_EXCEL_PATH`：检测文件路径，默认 `data/latest.xlsx`
 - `YANPU_BACKEND_HOST`：后端地址，默认 `127.0.0.1`
 - `YANPU_BACKEND_PORT`：后端端口，默认 `8000`
+- `YANPU_BACKEND_REQUEST_TIMEOUT_SEC`：前端请求后端超时秒数，默认 `30`
 - `YANPU_PLC_MODE`：`mock` 或 `tcp`，默认 `mock`
 - `YANPU_PLC_HOST`：PLC TCP 地址，默认 `127.0.0.1`
 - `YANPU_PLC_PORT`：PLC TCP 端口，默认 `5020`

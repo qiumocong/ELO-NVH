@@ -17,6 +17,7 @@ class DetectionDesktopApp:
         self.root.title("振动噪声检测")
         self.runtime_config = load_runtime_config()
         self.backend_url = f"http://{self.runtime_config.backend_host}:{self.runtime_config.backend_port}/detect"
+        self.request_timeout_sec = self.runtime_config.backend_request_timeout_sec
 
         self.status_var = tk.StringVar(value="待机")
         self.result_var = tk.StringVar(value="结果：--")
@@ -74,7 +75,7 @@ class DetectionDesktopApp:
         )
 
         try:
-            with request.urlopen(req, timeout=30) as resp:
+            with request.urlopen(req, timeout=self.request_timeout_sec) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except error.URLError as exc:
             self.root.after(0, lambda: self._on_error(f"请求失败: {exc}"))
@@ -105,7 +106,7 @@ class DetectionDesktopApp:
 
         self.status_var.set("检测完成")
         self.result_var.set(f"结果：{label}")
-        self.confidence_var.set(f"置信度：{confidence:.4f}")
+        self.confidence_var.set(f"置信度：{confidence*100:.2f}%")
         self.time_var.set(f"时间：{ts}")
 
         self.ax.clear()
@@ -128,4 +129,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
