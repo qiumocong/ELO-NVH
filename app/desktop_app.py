@@ -2,7 +2,7 @@ import json
 import threading
 import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from urllib import error, request
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -15,6 +15,7 @@ class DetectionDesktopApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("振动噪声检测")
+        self.root.configure(bg="#F3F5F9")
         self.runtime_config = load_runtime_config()
         self.backend_url = f"http://{self.runtime_config.backend_host}:{self.runtime_config.backend_port}/detect"
         self.request_timeout_sec = self.runtime_config.backend_request_timeout_sec
@@ -26,35 +27,74 @@ class DetectionDesktopApp:
         self.command_var = tk.StringVar(value="START_DETECT")
         self.excel_path_var = tk.StringVar(value=str(self.runtime_config.excel_path))
 
+        self._configure_style()
         self._build_layout()
 
+    def _configure_style(self):
+        style = ttk.Style(self.root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+        style.configure("Card.TLabelframe", background="#FFFFFF")
+        style.configure("Card.TLabelframe.Label", font=("Segoe UI", 11, "bold"))
+        style.configure("TFrame", background="#F3F5F9")
+        style.configure("TLabel", background="#F3F5F9", font=("Segoe UI", 10))
+        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"))
+        style.configure("Value.TLabel", font=("Segoe UI", 11))
+        style.configure("TButton", font=("Segoe UI", 10), padding=6)
+        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"), padding=8)
+        style.configure("TEntry", padding=5)
+
     def _build_layout(self):
-        ctrl_frame = ttk.Frame(self.root, padding=10)
+        main_frame = ttk.Frame(self.root, padding=14)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="振动噪声检测", style="Title.TLabel").pack(anchor=tk.W, pady=(0, 10))
+
+        ctrl_frame = ttk.LabelFrame(main_frame, text="检测配置", style="Card.TLabelframe", padding=12)
         ctrl_frame.pack(fill=tk.X)
+        ctrl_frame.columnconfigure(1, weight=1)
 
-        ttk.Label(ctrl_frame, text="PLC指令").grid(row=0, column=0, sticky=tk.W)
-        ttk.Entry(ctrl_frame, textvariable=self.command_var, width=25).grid(row=0, column=1, sticky=tk.W, padx=6)
+        ttk.Label(ctrl_frame, text="PLC 指令").grid(row=0, column=0, sticky=tk.W)
+        ttk.Entry(ctrl_frame, textvariable=self.command_var, width=28).grid(row=0, column=1, sticky=tk.W, padx=8)
 
-        ttk.Label(ctrl_frame, text="Excel路径").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
-        ttk.Entry(ctrl_frame, textvariable=self.excel_path_var, width=80).grid(row=1, column=1, sticky=tk.W, padx=6, pady=(6, 0))
+        ttk.Label(ctrl_frame, text="Excel/CSV 文件").grid(row=1, column=0, sticky=tk.W, pady=(8, 0))
+        ttk.Entry(ctrl_frame, textvariable=self.excel_path_var).grid(
+            row=1, column=1, sticky=tk.EW, padx=8, pady=(8, 0)
+        )
+        ttk.Button(ctrl_frame, text="选择文件", command=self._choose_excel_file).grid(
+            row=1, column=2, padx=(0, 8), pady=(8, 0)
+        )
 
-        self.detect_btn = ttk.Button(ctrl_frame, text="发送指令并检测", command=self._on_detect_click)
-        self.detect_btn.grid(row=0, column=2, rowspan=2, padx=(10, 0))
+        self.detect_btn = ttk.Button(ctrl_frame, text="开始检测", style="Accent.TButton", command=self._on_detect_click)
+        self.detect_btn.grid(row=0, column=2, padx=(0, 8))
 
-        status_frame = ttk.Frame(self.root, padding=(10, 0, 10, 10))
+        status_frame = ttk.LabelFrame(main_frame, text="检测状态", style="Card.TLabelframe", padding=12)
         status_frame.pack(fill=tk.X)
-        ttk.Label(status_frame, textvariable=self.status_var).pack(anchor=tk.W)
-        ttk.Label(status_frame, textvariable=self.result_var).pack(anchor=tk.W)
-        ttk.Label(status_frame, textvariable=self.confidence_var).pack(anchor=tk.W)
-        ttk.Label(status_frame, textvariable=self.time_var).pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.status_var, style="Value.TLabel").pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.result_var, style="Value.TLabel").pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.confidence_var, style="Value.TLabel").pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.time_var, style="Value.TLabel").pack(anchor=tk.W)
 
         fig = Figure(figsize=(8, 4), dpi=100)
         self.ax = fig.add_subplot(111)
         self.ax.set_title("振动波形")
         self.ax.set_xlabel("time")
         self.ax.set_ylabel("amplitude")
-        self.canvas = FigureCanvasTkAgg(fig, master=self.root)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.canvas = FigureCanvasTkAgg(fig, master=main_frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+
+    def _choose_excel_file(self):
+        path = filedialog.askopenfilename(
+            title="选择检测文件",
+            filetypes=[
+                ("Data files", "*.xlsx *.xls *.csv"),
+                ("Excel files", "*.xlsx *.xls"),
+                ("CSV files", "*.csv"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            self.excel_path_var.set(path)
 
     def _on_detect_click(self):
         self.detect_btn.state(["disabled"])
@@ -126,7 +166,8 @@ class DetectionDesktopApp:
 
 def main():
     root = tk.Tk()
-    root.geometry("980x700")
+    root.geometry("1100x760")
+    root.minsize(980, 700)
     app = DetectionDesktopApp(root)
     root.mainloop()
 
