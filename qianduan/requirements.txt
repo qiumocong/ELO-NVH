@@ -1,0 +1,4 @@
+PyQt5>=5.15
+pyqtgraph>=0.14
+numpy>=2.0
+websockets>=16.0
