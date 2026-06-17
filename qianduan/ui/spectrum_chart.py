@@ -1,54 +1,34 @@
 """
-频谱图组件
+时频谱图组件（STFT 伪彩图）
 
-作用：显示单个通道的 FFT 频谱。
+作用：显示单个通道的短时傅里叶变换结果。
 
-什么是"频谱图"？
-- 横轴是频率（Hz），纵轴是幅值
-- 能看出振动主要由哪些频率组成
-- 比如在 50Hz 处有高峰，说明存在 50Hz 的振动
+和旧版频谱图的区别：
+- 旧版：FFT → 频率-幅值 一条曲线（静态快照）
+- 新版：STFT → 时间×频率→能量 一张热力图（时频分布）
 
-这个组件会被实例化 3 次：
-- X 频谱（红色）、Y 频谱（绿色）、Z 频谱（蓝色）
-- 电流不需要做频谱分析
-
-频谱数据来源有两种：
-1. 前端计算：用 fft_utils.compute_fft() 对时域数据做 FFT（默认方式）
-2. 后端推送：后端直接发频谱数据过来，前端只负责展示
+横轴 = 时间（秒），纵轴 = 频率（Hz），颜色 = 能量（幅值）
 """
 
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 import pyqtgraph as pg
 import numpy as np
-from config import SAMPLE_RATE, FFT_WINDOW_SIZE
-from fft_utils import compute_fft, compute_fft_from_backend
+from config import SAMPLE_RATE
+from fft_utils import compute_stft
 
 
 class SpectrumChart(QWidget):
-    """单通道频谱图"""
+    """单通道时频谱图（STFT 伪彩图）"""
 
-    # 每个通道的颜色
     COLORS = {
-        "x": "#E74C3C",  # 红色
-        "y": "#2ECC71",  # 绿色
-        "z": "#3498DB",  # 蓝色
-    }
-
-    # 每个通道的标题
-    LABELS = {
-        "x": "X 频谱",
-        "y": "Y 频谱",
-        "z": "Z 频谱",
+        "x": "X 时频谱",
+        "y": "Y 时频谱",
+        "z": "Z 时频谱",
     }
 
     def __init__(self, channel: str, parent=None):
-        """
-        参数:
-            channel: 通道名称，必须是 "x", "y", "z" 之一
-        """
         super().__init__(parent)
         self.channel = channel
-        self._time_data = []  # 存储时域数据（用于前端 FFT 计算）
         self._setup_ui()
 
     def _setup_ui(self):
@@ -57,7 +37,7 @@ class SpectrumChart(QWidget):
         layout.setSpacing(2)
 
         # 标题
-        label = QLabel(self.LABELS.get(self.channel, self.channel))
+        label = QLabel(self.COLORS.get(self.channel, self.channel))
         label.setStyleSheet("font-size: 12px; font-weight: bold; color: #444;")
         layout.addWidget(label)
 
@@ -65,50 +45,68 @@ class SpectrumChart(QWidget):
         self._plot_widget = pg.PlotWidget()
         self._plot_widget.setBackground("w")
         self._plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self._plot_widget.setLabel("bottom", "频率", units="Hz")  # 横轴：频率
-        self._plot_widget.setLabel("left", "幅值")                 # 纵轴：幅值
+        self._plot_widget.setLabel("bottom", "时间", units="s")
+        self._plot_widget.setLabel("left", "频率", units="Hz")
         self._plot_widget.setMinimumHeight(120)
 
-        # 创建曲线
-        color = self.COLORS.get(self.channel, "#333")
-        pen = pg.mkPen(color=color, width=1.5)
-        self._curve = self._plot_widget.plot(pen=pen)
+        # 缩小坐标轴刻度字体
+        axis_font = pg.QtGui.QFont()
+        axis_font.setPointSize(8)
+        self._plot_widget.getAxis('left').setStyle(tickFont=axis_font)
+        self._plot_widget.getAxis('bottom').setStyle(tickFont=axis_font)
+
+        # 热力图图层
+        self._image_item = pg.ImageItem()
+        self._plot_widget.addItem(self._image_item)
+
+        # 颜色映射：黑→蓝→红→黄→白（能量从低到高）
+        cmap = pg.ColorMap(
+            pos=[0.0, 0.25, 0.5, 0.75, 1.0],
+            color=[(0, 0, 0), (0, 0, 180), (200, 0, 0), (255, 200, 0), (255, 255, 255)],
+        )
+        self._image_item.setLookupTable(cmap.getLookupTable(0.0, 1.0, 256))
 
         layout.addWidget(self._plot_widget)
 
     def update_from_time_data(self, time_values: list):
         """
-        方式一：前端计算频谱（默认方式）。
-        接收时域数据，自己做 FFT，然后画频谱图。
+        接收时域数据，做 STFT，画时频热力图。
 
         参数:
             time_values: 最新的时域数据列表
         """
-        if len(time_values) < 16:  # 数据太少没意义
+        if len(time_values) < 64:
             return
-        # 取最近 FFT_WINDOW_SIZE 个点做 FFT
-        recent = time_values[-FFT_WINDOW_SIZE:]
-        freqs, magnitudes = compute_fft(recent, SAMPLE_RATE)
-        self._plot(freqs, magnitudes)
 
-    def update_from_backend(self, freqs: list, magnitudes: list):
-        """
-        方式二：使用后端推送的频谱数据（不做计算，直接画）。
-        如果后端已经算好了频谱，前端直接展示即可。
+        # STFT 参数：窗口 256 点，步进 64 点
+        times, freqs, magnitudes = compute_stft(
+            time_values,
+            sample_rate=SAMPLE_RATE,
+            window_size=256,
+            hop_size=64,
+        )
 
-        参数:
-            freqs: 频率数组
-            magnitudes: 幅值数组
-        """
-        f, m = compute_fft_from_backend(freqs, magnitudes)
-        self._plot(f, m)
+        if magnitudes.size == 0:
+            return
 
-    def _plot(self, freqs: np.ndarray, magnitudes: np.ndarray):
-        """画频谱曲线"""
-        if len(freqs) > 0:
-            self._curve.setData(freqs, magnitudes)
+        # 用 dB 刻度显示，动态范围更清晰
+        mag_db = 20 * np.log10(magnitudes + 1e-10)
+
+        # 固定显示范围 -60dB ~ 0dB，让颜色分布更均匀
+        # 不用 autoLevels，否则纯信号会把噪底压成全蓝
+        self._image_item.setLevels([-60, 0])
+
+        # 设置图片的位置和缩放：让坐标轴对齐真实的时间和频率
+        t_min = times[0] if len(times) > 0 else 0
+        t_max = times[-1] if len(times) > 0 else 1
+        f_min = freqs[0]
+        f_max = freqs[-1]
+        self._image_item.setRect(t_min, f_min, t_max - t_min, f_max - f_min)
+
+        # ImageItem 期望数据 shape = (width, height)，即 (时间帧数, 频率数)
+        # 当前 magnitudes shape = (频率数, 时间帧数)，需要转置
+        self._image_item.setImage(mag_db.T)
 
     def clear(self):
         """清空数据"""
-        self._time_data.clear()
-        self._curve.setData([], [])
+        self._image_item.clear()

@@ -59,45 +59,43 @@ class LabelerWindow(QMainWindow):
 
         # --- 左侧：标注面板 ---
         left_panel = QWidget()
-        left_panel.setFixedWidth(200)
+        left_panel.setFixedWidth(400)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(8, 12, 8, 12)
+        left_layout.setContentsMargins(12, 20, 12, 12)
 
         self._labeler_panel = LabelerPanel()
         left_layout.addWidget(self._labeler_panel)
 
         content_layout.addWidget(left_panel)
 
-        # --- 右侧：图表区 ---
+        # --- 右侧：图表区，4 行布局 ---
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.setSpacing(6)
 
-        # 时域图行
-        time_row = QWidget()
-        time_layout = QHBoxLayout(time_row)
-        time_layout.setContentsMargins(0, 0, 0, 0)
-        time_layout.setSpacing(6)
-        for ch in CHANNELS:
-            chart = TimeChart(ch)
-            self._charts[ch] = chart
-            time_layout.addWidget(chart)
-        right_layout.addWidget(time_row, stretch=3)
+        # 前3行：X/Y/Z 各一行，左侧时域图，右侧频谱图
+        for ch in VIBRATION_CHANNELS:  # ["x", "y", "z"]
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
 
-        # 频谱图行
-        spectrum_row = QWidget()
-        spectrum_layout = QHBoxLayout(spectrum_row)
-        spectrum_layout.setContentsMargins(0, 0, 0, 0)
-        spectrum_layout.setSpacing(6)
-        for ch in VIBRATION_CHANNELS:
-            chart = SpectrumChart(ch)
-            self._spectrum_charts[ch] = chart
-            spectrum_layout.addWidget(chart)
-        placeholder = QWidget()
-        spectrum_layout.addWidget(placeholder)
-        right_layout.addWidget(spectrum_row, stretch=2)
+            time_chart = TimeChart(ch)
+            self._charts[ch] = time_chart
+            row_layout.addWidget(time_chart, stretch=1)
+
+            spectrum_chart = SpectrumChart(ch)
+            self._spectrum_charts[ch] = spectrum_chart
+            row_layout.addWidget(spectrum_chart, stretch=1)
+
+            right_layout.addWidget(row, stretch=1)
+
+        # 第4行：电流时域图，独占整行
+        current_chart = TimeChart("current")
+        self._charts["current"] = current_chart
+        right_layout.addWidget(current_chart, stretch=1)
 
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content, stretch=1)

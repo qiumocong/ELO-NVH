@@ -83,6 +83,12 @@ class TimeChart(QWidget):
         self._plot_widget.setLabel("left", self.LABELS.get(self.channel, ""), units=self.UNITS.get(self.channel, ""))
         self._plot_widget.setMinimumHeight(120)  # 最小高度
 
+        # 缩小坐标轴刻度字体
+        axis_font = pg.QtGui.QFont()
+        axis_font.setPointSize(8)
+        self._plot_widget.getAxis('left').setStyle(tickFont=axis_font)
+        self._plot_widget.getAxis('bottom').setStyle(tickFont=axis_font)
+
         # 创建曲线（设置颜色和线宽）
         color = self.COLORS.get(self.channel, "#333")
         pen = pg.mkPen(color=color, width=1.5)

@@ -132,14 +132,29 @@ class MockDataSource(QObject):
             t = self._time
             times.append(round(t, 6))
 
-            # x 方向：50Hz 振动 + 随机噪声
-            xs.append(math.sin(2 * math.pi * 50 * t) * 1.0 + random.gauss(0, 0.05))
-            # y 方向：120Hz 振动 + 随机噪声
-            ys.append(math.sin(2 * math.pi * 120 * t) * 0.6 + random.gauss(0, 0.03))
-            # z 方向：80Hz 振动 + 随机噪声
-            zs.append(math.sin(2 * math.pi * 80 * t) * 0.8 + random.gauss(0, 0.04))
+            # x 方向：chirp 信号，频率从 10Hz 二次曲线扫到 100Hz
+            # MATLAB: chirp(t, 10, 1, 100, 'q')
+            # 瞬时频率 f(t) = f0 + (f1-f0)*(t/t1)^2
+            # 相位 φ(t) = 2π * (f0*t + (f1-f0)*t^3 / (3*t1^2))
+            f0, f1, t1 = 10, 100, 1.0
+            phase = 2 * math.pi * (f0 * t + (f1 - f0) * t ** 3 / (3 * t1 ** 2))
+            xs.append(math.sin(phase) * 0.8 + random.gauss(0, 0.1))
+
+            # y 方向：120Hz 主频 + 谐波(240Hz) + 噪声
+            ys.append(
+                math.sin(2 * math.pi * 120 * t) * 0.5
+                + math.sin(2 * math.pi * 240 * t) * 0.15
+                + random.gauss(0, 0.15)
+            )
+            # z 方向：80Hz 主频 + 谐波(160Hz, 320Hz) + 噪声
+            zs.append(
+                math.sin(2 * math.pi * 80 * t) * 0.6
+                + math.sin(2 * math.pi * 160 * t) * 0.2
+                + math.sin(2 * math.pi * 320 * t) * 0.08
+                + random.gauss(0, 0.18)
+            )
             # 电流：基础值 1.5A + 缓慢波动 + 噪声
-            currents.append(1.5 + 0.3 * math.sin(2 * math.pi * 5 * t) + random.gauss(0, 0.02))
+            currents.append(1.5 + 0.3 * math.sin(2 * math.pi * 5 * t) + random.gauss(0, 0.05))
 
             self._time += self._dt  # 时间前进一个步长
 
