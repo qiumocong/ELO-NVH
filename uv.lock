@@ -3117,6 +3117,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pymcprotocol"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/be/7b57c17f31010e8a787224c03c7ee982d85cd6820f67943078af7f0d5f86/pymcprotocol-0.3.0.tar.gz", hash = "sha256:4ecc47c1c1f0955b0eddaa137d29663dbd30892f57119c74bf711b317cfdc23a", size = 13687, upload-time = "2021-04-26T10:28:49.198Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/53/f22a4bc4e38555c8d8b4783d0a7fe4a0e9ddc6258910cf03f8e448f93593/pymcprotocol-0.3.0-py3-none-any.whl", hash = "sha256:614217d43fbf8d9e409c1928993cbb4339d17828c1002c1766ce900aaee12dd6", size = 13555, upload-time = "2021-04-26T10:28:47.504Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -4856,6 +4865,7 @@ dependencies = [
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9' and python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pyinstaller" },
+    { name = "pymcprotocol" },
     { name = "python-multipart", version = "0.0.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "python-multipart", version = "0.0.22", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "scikit-learn", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
@@ -4878,6 +4888,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.0.3" },
     { name = "pyinstaller", specifier = ">=6.20.0" },
+    { name = "pymcprotocol", specifier = ">=0.3.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "scikit-learn", specifier = ">=1.3.2" },
     { name = "soundfile", specifier = ">=0.13.1" },
