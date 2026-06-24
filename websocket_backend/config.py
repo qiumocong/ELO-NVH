@@ -12,6 +12,10 @@ PLC_PORT = 1025
 PLC_MODE_REG = "R10"           # 1自动, 2人工
 PLC_PRODUCT_REG = "R11"        # 规格名（10个字）
 
+# ---------- 心跳 ----------
+HEARTBEAT_REG = "R999"        # 心跳寄存器（公共）
+HEARTBEAT_INTERVAL = 1.0      # 心跳间隔（秒）
+
 # 工位配置（包含NI通道和模型输入索引）
 STATIONS = {
     "left": {
