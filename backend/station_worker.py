@@ -29,6 +29,7 @@ class StationWorker:
         self.running = True
         self.current_barcode = ""
         self.current_spec = ""
+        self.last_heartbeat = time.time()   # 心跳计时
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
@@ -41,19 +42,23 @@ class StationWorker:
 
     def save_per_channel(self, t, data, label):
         """
-        保存每个通道为独立CSV，每个文件包含时间列和该通道数据。
-        文件存放于： DATA_SAVE_DIR/{标签}/{规格名}_{条码}/ch0.csv, ch1.csv, ...
+        目录结构：DATA_SAVE_DIR/{barcode}/{label}/{spec}/
+        每个通道保存为单独CSV，包含 time 和 ch_i 两列
         """
         label_str = "OK" if label == 0 else "NG"
-        safe_spec = "".join(c for c in self.current_spec if c.isalnum() or c in ('_', '-'))
+        # 安全处理文件夹名：替换非法字符
         safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
-        folder_name = f"{safe_spec}_{safe_barcode}"
-        if not folder_name or folder_name == "_":
-            folder_name = f"unknown_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        save_dir = os.path.join(DATA_SAVE_DIR, label_str, folder_name)
+        safe_spec = "".join(c for c in self.current_spec if c.isalnum() or c in ('_', '-'))
+        # 若缺少信息，使用默认值
+        if not safe_barcode:
+            safe_barcode = f"NOBARCODE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if not safe_spec:
+            safe_spec = "UNKNOWN_SPEC"
+        # 构建路径
+        save_dir = os.path.join(DATA_SAVE_DIR, safe_barcode, label_str, safe_spec)
         os.makedirs(save_dir, exist_ok=True)
 
-        # 每个通道单独保存，包含时间列
+        # 保存每个通道（包含时间列）
         for i in range(data.shape[0]):
             ch_path = os.path.join(save_dir, f"ch{i}.csv")
             df = pd.DataFrame({
@@ -62,12 +67,20 @@ class StationWorker:
             })
             df.to_csv(ch_path, index=False)
 
-        print(f"[{self.name}] 数据已保存至 {save_dir} (共 {data.shape[0]} 个通道)")
+        # 可选：保存一个元数据文件（如工位、时间等），但非必需
+        print(f"[{self.name}] 数据已保存至 {save_dir}")
 
     def run(self):
         print(f"[{self.name}] 线程启动")
         while self.running:
             try:
+                # ---------- 心跳：每秒读取一次模式寄存器，保持通信活跃 ----------
+                now = time.time()
+                if now - self.last_heartbeat >= 1.0:
+                    _ = self.plc.read_mode()  # 读取操作即发送通信包
+                    self.last_heartbeat = now
+
+                # ---------- 状态机 ----------
                 plc_step = self.plc.read_station_step(self.name)
 
                 if plc_step == STEP_READY and self.state == "idle":
@@ -103,7 +116,7 @@ class StationWorker:
                         self.state = "idle"
                         continue
 
-                    # 确保条码/规格已读取
+                    # 确保条码/规格已读取（若之前未读取则补读）
                     if not self.current_barcode:
                         self.current_barcode = self.plc.read_barcode(
                             self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
@@ -141,6 +154,7 @@ class StationWorker:
                         print(f"[{self.name}] 人工判定: {'OK' if label == 0 else 'NG'}")
                         self.plc.write_pc_step(self.name, STEP_TEST_END)
 
+                    # 保存数据
                     self.save_per_channel(t, data, label)
                     self.state = "idle"
                     print(f"[{self.name}] 处理完成")
