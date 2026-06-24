@@ -1,14 +1,7 @@
 """
 数据集标注工具 — 程序入口
 
-作用：提供人工标注界面，用于制作训练数据集。
-
-和 main.py 的区别：
-- main.py 是检测模式（选模型 → 自动推理 → 显示结果）
-- labeler.py 是标注模式（直接看数据 → 人工判断合格/不合格 → 保存标签）
-
 启动方式：
-    conda activate task
     python labeler.py          # 用模拟数据
     python labeler.py --ws     # 用真实 WebSocket
 """
@@ -28,7 +21,6 @@ def main():
 
     window = LabelerWindow()
 
-    # 标注模式：auto_start=True，启动后立即推送数据，不需要选模型
     from mock_data import MockDataSource
     source = MockDataSource(interval_ms=50, batch_size=10, auto_start=True)
 

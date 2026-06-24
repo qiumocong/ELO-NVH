@@ -1,26 +1,11 @@
 """
 数据集标注主窗口 — 双组数据版本
-
-布局结构：
-┌─────────────────────────────────────────────────────────────────┐
-│  StatusBarWidget                                                  │
-├──────────┬─────────────────────┬─────────────────────────────────┤
-│ 左侧标注  │ 左X时域 │ 左X频谱   │ 右X时域 │ 右X频谱               │
-│ [合格]    ├─────────────────────┼─────────────────────────────────┤
-│ [不合格]  │ 左Y时域 │ 左Y频谱   │ 右Y时域 │ 右Y频谱               │
-│ [确认]    ├─────────────────────┼─────────────────────────────────┤
-│          │ 左Z时域 │ 左Z频谱   │ 右Z时域 │ 右Z频谱               │
-│ ──────── ├─────────────────────┼─────────────────────────────────┤
-│ 右侧标注  │ 左电流              │ 右电流                           │
-│ [合格]    │                     │                                   │
-│ [不合格]  │                     │                                   │
-│ [确认]    │                     │                                   │
-└──────────┴─────────────────────┴─────────────────────────────────┘
 """
 
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QFrame
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
 )
+from PyQt5.QtCore import Qt
 from config import VIBRATION_CHANNELS
 from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
@@ -29,6 +14,7 @@ from ui.labeler_panel import LabelerPanel
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
+SIDE_TITLES = {"left": "左工位", "right": "右工位"}
 
 
 class LabelerWindow(QMainWindow):
@@ -52,7 +38,6 @@ class LabelerWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- 状态栏 ---
         self._status_bar = StatusBarWidget()
         main_layout.addWidget(self._status_bar)
 
@@ -61,29 +46,70 @@ class LabelerWindow(QMainWindow):
         sep.setStyleSheet("color: #ddd;")
         main_layout.addWidget(sep)
 
-        # --- 主内容区 ---
         content = QWidget()
         content_layout = QHBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        # ========== 左侧面板：双标注面板 ==========
+        # ========== 左侧面板 ==========
         left_panel = QWidget()
         left_panel.setFixedWidth(400)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(12, 20, 12, 12)
-        left_layout.setSpacing(4)
+        left_layout.setSpacing(6)
 
-        # 左侧标注面板
-        self._labeler_left = LabelerPanel("left")
-        left_layout.addWidget(self._labeler_left, stretch=1)
+        # 工位信息
+        self._info_labels = {}
+        for side in SIDES:
+            frame = QFrame()
+            frame.setFrameShape(QFrame.StyledPanel)
+            frame.setStyleSheet("""
+                QFrame {
+                    background-color: #f0f4f8;
+                    border: 1px solid #d0d8e0;
+                    border-radius: 6px;
+                    padding: 6px;
+                }
+            """)
+            fl = QVBoxLayout(frame)
+            fl.setContentsMargins(8, 6, 8, 6)
+            fl.setSpacing(2)
+
+            title = QLabel(SIDE_TITLES[side])
+            title.setStyleSheet("font-size: 13px; font-weight: bold; color: #333;")
+            fl.addWidget(title)
+
+            barcode = QLabel("条码: ——")
+            barcode.setStyleSheet("font-size: 12px; color: #555;")
+            fl.addWidget(barcode)
+
+            spec = QLabel("规格: ——")
+            spec.setStyleSheet("font-size: 12px; color: #555;")
+            fl.addWidget(spec)
+
+            mode = QLabel("模式: ——")
+            mode.setStyleSheet("font-size: 12px; color: #555;")
+            fl.addWidget(mode)
+
+            self._info_labels[side] = {"barcode": barcode, "spec": spec, "mode": mode}
+            left_layout.addWidget(frame)
 
         # 分隔
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setStyleSheet("color: #ccc;")
         left_layout.addWidget(sep2)
+
+        # 左侧标注面板
+        self._labeler_left = LabelerPanel("left")
+        left_layout.addWidget(self._labeler_left, stretch=1)
+
+        # 分隔
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.HLine)
+        sep3.setStyleSheet("color: #ccc;")
+        left_layout.addWidget(sep3)
 
         # 右侧标注面板
         self._labeler_right = LabelerPanel("right")
@@ -97,25 +123,20 @@ class LabelerWindow(QMainWindow):
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.setSpacing(6)
 
-        # X/Y/Z 三行：每行 左时域+左频谱 | 右时域+右频谱
         for ch in VIBRATION_CHANNELS:
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
-
             for side in SIDES:
                 time_chart = TimeChart(f"{side}_{ch}")
                 self._charts[side][ch] = time_chart
                 row_layout.addWidget(time_chart, stretch=1)
-
                 spectrum_chart = SpectrumChart(f"{side}_{ch}")
                 self._spectrum_charts[side][ch] = spectrum_chart
                 row_layout.addWidget(spectrum_chart, stretch=1)
-
             right_layout.addWidget(row, stretch=1)
 
-        # 电流行：左电流 | 右电流
         current_row = QWidget()
         current_layout = QHBoxLayout(current_row)
         current_layout.setContentsMargins(0, 0, 0, 0)
@@ -131,6 +152,8 @@ class LabelerWindow(QMainWindow):
 
     def connect_data_source(self, source):
         source.data_received.connect(self._on_data)
+        source.result_received.connect(self._on_result)
+        source.info_received.connect(self._on_info)
         source.connection_changed.connect(self._on_connection_changed)
         self._labeler_left.label_submitted.connect(source.send_label)
         self._labeler_right.label_submitted.connect(source.send_label)
@@ -157,6 +180,27 @@ class LabelerWindow(QMainWindow):
                 chart = self._charts[side][ch]
                 if len(chart._values) >= 16:
                     self._spectrum_charts[side][ch].update_from_time_data(list(chart._values))
+
+    def _on_info(self, msg: dict):
+        side = msg.get("side", "left")
+        labels = self._info_labels.get(side)
+        if not labels:
+            return
+        barcode = msg.get("barcode", msg.get("obj_id", "——"))
+        spec = msg.get("spec", "——")
+        mode = msg.get("mode", "——")
+        mode_display = {"auto": "自动", "manual": "人工"}.get(mode, mode)
+        labels["barcode"].setText(f"条码: {barcode}")
+        labels["spec"].setText(f"规格: {spec}")
+        labels["mode"].setText(f"模式: {mode_display}")
+
+    def _on_result(self, msg: dict):
+        side = msg.get("side", "left")
+        result_text = msg.get("result", "")
+        if side == "right":
+            self._labeler_right._status_label.setText(f"后端: {result_text}")
+        else:
+            self._labeler_left._status_label.setText(f"后端: {result_text}")
 
     def _on_connection_changed(self, connected: bool):
         self._status_bar.set_connected(connected)
