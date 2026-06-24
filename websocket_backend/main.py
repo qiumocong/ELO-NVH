@@ -4,8 +4,15 @@ from station_worker import StationWorker
 from model_inference import load_model
 from plc_comm import PLCClient
 from heartbeat import Heartbeat
+import threading
+import websocket_server
+
+def start_ws():
+    websocket_server.start_ws_server()
 
 def main():
+    ws_thread = threading.Thread(target=start_ws, daemon=True)
+    ws_thread.start()
     # 启动心跳
     heartbeat = Heartbeat()
     heartbeat.start()
