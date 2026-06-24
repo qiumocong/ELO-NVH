@@ -24,13 +24,11 @@ from PyQt5.QtCore import QObject, pyqtSignal
 class WebSocketClient(QObject):
     """WebSocket 客户端，在独立线程中运行，通过 Qt 信号与主线程通信。"""
 
-    # ---- 信号定义 ----
-    # 这些信号会被 emit（发射），MainWindow 那边绑定的槽函数会自动执行
-    data_received = pyqtSignal(dict)       # 收到传感器数据（单点或批量）
-    result_received = pyqtSignal(dict)     # 收到检测结果
-    obj_id_received = pyqtSignal(object)   # 收到工件 ID (支持 dict 或 str)
-    model_list_received = pyqtSignal(list) # 收到可用模型列表
-    connection_changed = pyqtSignal(bool)  # 连接状态变化（连上/断开）
+    data_received = pyqtSignal(dict)
+    result_received = pyqtSignal(dict)
+    info_received = pyqtSignal(dict)       # 工位信息: barcode, spec, mode
+    model_list_received = pyqtSignal(list)
+    connection_changed = pyqtSignal(bool)
 
     def __init__(self, url: str = "ws://localhost:8080", reconnect_interval: int = 3):
         super().__init__()
@@ -63,10 +61,6 @@ class WebSocketClient(QObject):
         if self._loop and self._ws:
             # run_coroutine_threadsafe 让 asyncio 协程在子线程的事件循环中执行
             asyncio.run_coroutine_threadsafe(self._send(msg), self._loop)
-
-    def send_model(self, model_id: str):
-        """告诉后端用户选择了哪个模型"""
-        self.send_message({"type": "select_model", "model_id": model_id})
 
     def send_start(self):
         """告诉后端开始检测"""
@@ -149,7 +143,7 @@ class WebSocketClient(QObject):
             self.data_received.emit(msg)
         elif msg_type == "result":
             self.result_received.emit(msg)
-        elif msg_type == "obj_id":
-            self.obj_id_received.emit(msg.get("obj_id", ""))
+        elif msg_type in ("info", "obj_id"):
+            self.info_received.emit(msg)
         elif msg_type == "model_list":
             self.model_list_received.emit(msg.get("models", []))
