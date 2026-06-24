@@ -1,44 +1,52 @@
 """
-主窗口模块
+主窗口模块 — 双组数据版本
 
 布局结构：
-┌──────────────────────────────────────────┐
-│  StatusBarWidget（连接状态指示灯）         │
-├──────────────┬─────────────┬─────────────┤
-│  工件 ID      │  X 时域图    │  X 频谱图   │
-│  [模型选择▼]  ├─────────────┼─────────────┤
-│  [确认]       │  Y 时域图    │  Y 频谱图   │
-│              ├─────────────┼─────────────┤
-│ ┌──────────┐ │  Z 时域图    │  Z 频谱图   │
-│ │ 检测结果  │ ├─────────────┴─────────────┤
-│ │ (醒目大字)│ │  电流时域图               │
-│ └──────────┘ │                           │
-└──────────────┴───────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  StatusBarWidget                                                  │
+├──────────┬─────────────────────┬─────────────────────────────────┤
+│ 左工件ID  │ 左X时域 │ 左X频谱   │ 右X时域 │ 右X频谱               │
+│ 右工件ID  ├─────────────────────┼─────────────────────────────────┤
+│ [模型▼]   │ 左Y时域 │ 左Y频谱   │ 右Y时域 │ 右Y频谱               │
+│ [确认]    ├─────────────────────┼─────────────────────────────────┤
+│          │ 左Z时域 │ 左Z频谱   │ 右Z时域 │ 右Z频谱               │
+│ ┌──────┐ ├─────────────────────┼─────────────────────────────────┤
+│ │左结果 │ │ 左电流              │ 右电流                           │
+│ ├──────┤ │                     │                                   │
+│ │右结果 │ │                     │                                   │
+│ └──────┘ │                     │                                   │
+└──────────┴─────────────────────┴─────────────────────────────────┘
 """
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QComboBox, QPushButton, QFrame
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from config import CHANNELS, VIBRATION_CHANNELS
+from PyQt5.QtCore import Qt
+from config import VIBRATION_CHANNELS
 from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.result_panel import ResultPanel
 
+SIDES = ["left", "right"]
+ALL_CHANNELS = ["x", "y", "z", "current"]
+
 
 class MainWindow(QMainWindow):
-    """主窗口：组装所有组件，连接信号"""
+    """主窗口：双组数据 + 双推理结果"""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("XXX 检测系统")
-        self.setMinimumSize(1200, 700)
-        self.resize(1400, 800)
+        self.setMinimumSize(1400, 800)
+        self.resize(1600, 900)
 
-        self._charts = {}
-        self._spectrum_charts = {}
+        # 时域图: self._charts["left"]["x"], self._charts["right"]["y"], ...
+        self._charts = {side: {} for side in SIDES}
+        # 频谱图: self._spectrum_charts["left"]["x"], ...
+        self._spectrum_charts = {side: {} for side in SIDES}
+
         self._data_started = False
         self._source = None
 
@@ -66,7 +74,7 @@ class MainWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        # --- 左侧面板：工件ID + 模型选择 + 检测结果 ---
+        # ========== 左侧面板 ==========
         left_panel = QWidget()
         left_panel.setFixedWidth(400)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
@@ -74,11 +82,17 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(12, 20, 12, 12)
         left_layout.setSpacing(10)
 
-        # 工件 ID
-        self._obj_label = QLabel("工件 ID: ——")
-        self._obj_label.setFixedHeight(40)
-        self._obj_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
-        left_layout.addWidget(self._obj_label)
+        # 左工件 ID
+        self._obj_label_left = QLabel("左工件 ID: ——")
+        self._obj_label_left.setFixedHeight(36)
+        self._obj_label_left.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        left_layout.addWidget(self._obj_label_left)
+
+        # 右工件 ID
+        self._obj_label_right = QLabel("右工件 ID: ——")
+        self._obj_label_right.setFixedHeight(36)
+        self._obj_label_right.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        left_layout.addWidget(self._obj_label_right)
 
         # 模型选择
         model_label = QLabel("选择模型:")
@@ -119,37 +133,58 @@ class MainWindow(QMainWindow):
         sep2.setStyleSheet("color: #ddd;")
         left_layout.addWidget(sep2)
 
-        # 检测结果（占据剩余空间）
-        self._result_panel = ResultPanel()
-        left_layout.addWidget(self._result_panel)
+        # 左推理结果 — 上半
+        self._result_panel_left = ResultPanel("左侧检测结果")
+        left_layout.addWidget(self._result_panel_left, stretch=1)
+
+        # 分隔
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.HLine)
+        sep3.setStyleSheet("color: #ccc;")
+        left_layout.addWidget(sep3)
+
+        # 右推理结果 — 下半
+        self._result_panel_right = ResultPanel("右侧检测结果")
+        left_layout.addWidget(self._result_panel_right, stretch=1)
 
         content_layout.addWidget(left_panel)
 
-        # --- 右侧图表区：4 行布局 ---
+        # ========== 右侧图表区 ==========
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.setSpacing(6)
 
-        for ch in VIBRATION_CHANNELS:
+        # 第1行：X — 左时域/左频谱 | 右时域/右频谱
+        # 第2行：Y — 同上
+        # 第3行：Z — 同上
+        for ch in VIBRATION_CHANNELS:  # ["x", "y", "z"]
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
 
-            time_chart = TimeChart(ch)
-            self._charts[ch] = time_chart
-            row_layout.addWidget(time_chart, stretch=1)
+            for side in SIDES:
+                time_chart = TimeChart(f"{side}_{ch}")
+                self._charts[side][ch] = time_chart
+                row_layout.addWidget(time_chart, stretch=1)
 
-            spectrum_chart = SpectrumChart(ch)
-            self._spectrum_charts[ch] = spectrum_chart
-            row_layout.addWidget(spectrum_chart, stretch=1)
+                spectrum_chart = SpectrumChart(f"{side}_{ch}")
+                self._spectrum_charts[side][ch] = spectrum_chart
+                row_layout.addWidget(spectrum_chart, stretch=1)
 
             right_layout.addWidget(row, stretch=1)
 
-        current_chart = TimeChart("current")
-        self._charts["current"] = current_chart
-        right_layout.addWidget(current_chart, stretch=1)
+        # 第4行：电流 — 左电流 | 右电流
+        current_row = QWidget()
+        current_layout = QHBoxLayout(current_row)
+        current_layout.setContentsMargins(0, 0, 0, 0)
+        current_layout.setSpacing(6)
+        for side in SIDES:
+            chart = TimeChart(f"{side}_current")
+            self._charts[side]["current"] = chart
+            current_layout.addWidget(chart, stretch=1)
+        right_layout.addWidget(current_row, stretch=1)
 
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content, stretch=1)
@@ -168,57 +203,56 @@ class MainWindow(QMainWindow):
         source.connection_changed.connect(self._on_connection_changed)
 
     def _on_data(self, msg: dict):
-        """
-        处理接收到的传感器数据。
-
-        数据格式有两种：
-        1. 单点：{"timestamp": 0.012, "x": 0.21, "y": -0.13, ...}
-        2. 批量：{"time": [0.001, 0.002, ...], "x": [0.12, 0.15, ...], ...}
-        """
-        # 第一次收到数据时，更新检测状态为"检测中"
         if not self._data_started:
             self._data_started = True
             self._status_bar.set_detect_status("检测中")
 
         times = msg.get("time", [])
         if not times:
-            # --- 单点数据 ---
             t = msg.get("timestamp", 0)
             times = [t]
-            for ch in CHANNELS:
-                val = msg.get(ch)
-                if val is not None:
-                    self._charts[ch].add_data([t], [val])
+            for side in SIDES:
+                for ch in ALL_CHANNELS:
+                    val = msg.get(f"{side}_{ch}")
+                    if val is not None:
+                        self._charts[side][ch].add_data([t], [val])
         else:
-            # --- 批量数据 ---
-            for ch in CHANNELS:
-                values = msg.get(ch, [])
-                if values:
-                    self._charts[ch].add_data(times, values)
+            for side in SIDES:
+                for ch in ALL_CHANNELS:
+                    values = msg.get(f"{side}_{ch}", [])
+                    if values:
+                        self._charts[side][ch].add_data(times, values)
 
-        # --- 更新频谱图 ---
-        # 取每个振动通道的最新数据做 FFT
-        for ch in VIBRATION_CHANNELS:
-            chart = self._charts[ch]
-            if len(chart._values) >= 16:  # 至少 16 个点才能做有意义的 FFT
-                self._spectrum_charts[ch].update_from_time_data(list(chart._values))
+        # 更新频谱图
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                chart = self._charts[side][ch]
+                if len(chart._values) >= 16:
+                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values))
 
     def _on_result(self, msg: dict):
-        """处理检测结果"""
-        self._result_panel.set_result(
-            msg.get("result", ""),
-            msg.get("score", 0.0),
-            msg.get("message", ""),
-        )
+        result_text = msg.get("result", "")
+        score = msg.get("score", 0.0)
+        message = msg.get("message", "")
+        # 结果可以带 side 字段区分左右
+        side = msg.get("side", "left")
+        if side == "right":
+            self._result_panel_right.set_result(result_text, score, message)
+        else:
+            self._result_panel_left.set_result(result_text, score, message)
         self._status_bar.set_detect_status("完成")
 
     def _on_obj_id(self, obj_id: str):
-        self._obj_label.setText(f"工件 ID: {obj_id}")
+        side = obj_id.get("side", "left") if isinstance(obj_id, dict) else "left"
+        oid = obj_id.get("obj_id", obj_id) if isinstance(obj_id, dict) else obj_id
+        if side == "right":
+            self._obj_label_right.setText(f"右工件 ID: {oid}")
+        else:
+            self._obj_label_left.setText(f"左工件 ID: {oid}")
 
     def _on_model_list(self, models: list):
         self._model_combo.clear()
         self._model_combo.addItems(models)
 
     def _on_connection_changed(self, connected: bool):
-        """处理连接状态变化"""
         self._status_bar.set_connected(connected)

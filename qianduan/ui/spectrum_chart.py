@@ -20,25 +20,33 @@ from fft_utils import compute_stft
 class SpectrumChart(QWidget):
     """单通道时频谱图（STFT 伪彩图）"""
 
-    COLORS = {
-        "x": "X 时频谱",
-        "y": "Y 时频谱",
-        "z": "Z 时频谱",
+    TITLES = {
+        "x": "X 时频谱", "y": "Y 时频谱", "z": "Z 时频谱",
     }
+
+    SIDE_NAMES = {"left": "左", "right": "右"}
 
     def __init__(self, channel: str, parent=None):
         super().__init__(parent)
         self.channel = channel
         self._setup_ui()
 
+    def _resolve(self):
+        """解析 channel 名，返回 (base, display_title)"""
+        if "_" in self.channel:
+            side, base = self.channel.split("_", 1)
+            return base, f"{self.SIDE_NAMES.get(side, side)} {self.TITLES.get(base, base)}"
+        return self.channel, self.TITLES.get(self.channel, self.channel)
+
     def _setup_ui(self):
+        base, display_title = self._resolve()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        # 标题
-        label = QLabel(self.COLORS.get(self.channel, self.channel))
-        label.setStyleSheet("font-size: 12px; font-weight: bold; color: #444;")
+        label = QLabel(display_title)
+        label.setStyleSheet("font-size: 11px; font-weight: bold; color: #444;")
         layout.addWidget(label)
 
         # pyqtgraph 绘图组件

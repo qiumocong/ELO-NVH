@@ -26,71 +26,64 @@ from config import MAX_POINTS
 class TimeChart(QWidget):
     """单通道时域曲线图"""
 
-    # 每个通道的曲线颜色
     COLORS = {
-        "x": "#E74C3C",       # 红色
-        "y": "#2ECC71",       # 绿色
-        "z": "#3498DB",       # 蓝色
-        "current": "#F39C12", # 橙色
+        "x": "#E74C3C", "y": "#2ECC71", "z": "#3498DB", "current": "#F39C12",
     }
 
-    # 每个通道的标题文字
     LABELS = {
-        "x": "X 方向振动",
-        "y": "Y 方向振动",
-        "z": "Z 方向振动",
-        "current": "电流",
+        "x": "X 方向振动", "y": "Y 方向振动", "z": "Z 方向振动", "current": "电流",
     }
 
-    # 每个通道的纵轴单位
     UNITS = {
-        "x": "g",    # 加速度单位
-        "y": "g",
-        "z": "g",
-        "current": "A",  # 电流单位：安培
+        "x": "g", "y": "g", "z": "g", "current": "A",
     }
+
+    SIDE_NAMES = {"left": "左", "right": "右"}
 
     def __init__(self, channel: str, parent=None):
         """
         参数:
-            channel: 通道名称，必须是 "x", "y", "z", "current" 之一
+            channel: 如 "left_x", "right_y", 或单纯的 "x", "y", "current"
         """
         super().__init__(parent)
         self.channel = channel
-
-        # 用 deque 存数据，最多保留 MAX_POINTS 个点
-        # deque(maxlen=N) 的特性：满了自动丢弃最左边（最旧）的数据
         self._times = collections.deque(maxlen=MAX_POINTS)
         self._values = collections.deque(maxlen=MAX_POINTS)
-
         self._setup_ui()
 
+    def _resolve(self):
+        """解析 channel 名，返回 (base, side_name, display_label)"""
+        if "_" in self.channel:
+            side, base = self.channel.split("_", 1)
+            return base, self.SIDE_NAMES.get(side, side), \
+                   f"{self.SIDE_NAMES.get(side, side)} {self.LABELS.get(base, base)}"
+        return self.channel, "", self.LABELS.get(self.channel, self.channel)
+
     def _setup_ui(self):
+        base, side, display_label = self._resolve()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        # 标题标签
-        label = QLabel(self.LABELS.get(self.channel, self.channel))
-        label.setStyleSheet("font-size: 12px; font-weight: bold; color: #444;")
+        label = QLabel(display_label)
+        label.setStyleSheet("font-size: 11px; font-weight: bold; color: #444;")
         layout.addWidget(label)
 
-        # pyqtgraph 绘图组件（高性能实时图表库）
         self._plot_widget = pg.PlotWidget()
-        self._plot_widget.setBackground("w")           # 白色背景
-        self._plot_widget.showGrid(x=True, y=True, alpha=0.3)  # 显示网格线
-        self._plot_widget.setLabel("bottom", "时间", units="s")  # 横轴标签
-        self._plot_widget.setLabel("left", self.LABELS.get(self.channel, ""), units=self.UNITS.get(self.channel, ""))
-        self._plot_widget.setMinimumHeight(120)  # 最小高度
+        self._plot_widget.setBackground("w")
+        self._plot_widget.showGrid(x=True, y=True, alpha=0.3)
+        self._plot_widget.setLabel("bottom", "时间", units="s")
+        y_label = self.LABELS.get(base, base)
+        self._plot_widget.setLabel("left", y_label, units=self.UNITS.get(base, ""))
+        self._plot_widget.setMinimumHeight(100)
 
-        # 缩小坐标轴刻度字体
         axis_font = pg.QtGui.QFont()
         axis_font.setPointSize(8)
         self._plot_widget.getAxis('left').setStyle(tickFont=axis_font)
         self._plot_widget.getAxis('bottom').setStyle(tickFont=axis_font)
 
-        # 创建曲线（设置颜色和线宽）
-        color = self.COLORS.get(self.channel, "#333")
+        color = self.COLORS.get(base, "#333")
         pen = pg.mkPen(color=color, width=1.5)
         self._curve = self._plot_widget.plot(pen=pen)
 

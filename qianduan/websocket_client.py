@@ -28,7 +28,7 @@ class WebSocketClient(QObject):
     # 这些信号会被 emit（发射），MainWindow 那边绑定的槽函数会自动执行
     data_received = pyqtSignal(dict)       # 收到传感器数据（单点或批量）
     result_received = pyqtSignal(dict)     # 收到检测结果
-    obj_id_received = pyqtSignal(str)      # 收到工件 ID
+    obj_id_received = pyqtSignal(object)   # 收到工件 ID (支持 dict 或 str)
     model_list_received = pyqtSignal(list) # 收到可用模型列表
     connection_changed = pyqtSignal(bool)  # 连接状态变化（连上/断开）
 
@@ -76,9 +76,9 @@ class WebSocketClient(QObject):
         """告诉后端停止检测"""
         self.send_message({"type": "stop"})
 
-    def send_label(self, label: int):
+    def send_label(self, side: str, label: int):
         """发送人工标注结果（数据集标注模式用）"""
-        self.send_message({"type": "label", "label": label})
+        self.send_message({"type": "label", "side": side, "label": label})
 
     @property
     def connected(self) -> bool:

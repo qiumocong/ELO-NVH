@@ -27,7 +27,7 @@ class MockDataSource(QObject):
 
     # ---- 信号定义（和 WebSocketClient 完全一样）----
     data_received = pyqtSignal(dict)       # 传感器数据
-    obj_id_received = pyqtSignal(str)      # 工件 ID
+    obj_id_received = pyqtSignal(object)   # 工件 ID (支持 dict 或 str)
     model_list_received = pyqtSignal(list) # 模型列表
     result_received = pyqtSignal(dict)     # 检测结果
     connection_changed = pyqtSignal(bool)  # 连接状态
@@ -87,11 +87,13 @@ class MockDataSource(QObject):
     def send_model(self, model_id: str):
         """
         用户选择了模型后调用。
-        模拟后端确认模型 → 返回工件 ID → 开始推送数据。
+        模拟后端确认模型 → 返回左右工件 ID → 开始推送数据。
         """
         print(f"[Mock] selected model: {model_id}")
-        # 后端确认模型后，返回当前工件的编号
-        self.obj_id_received.emit(self._obj_id)
+        # 左侧工件 ID
+        self.obj_id_received.emit({"side": "left", "obj_id": self._obj_id + "_L"})
+        # 右侧工件 ID
+        self.obj_id_received.emit({"side": "right", "obj_id": self._obj_id + "_R"})
         # 重置时间，开始推送数据
         self._time = 0.0
         self._timer.start(self.interval_ms)
@@ -107,75 +109,83 @@ class MockDataSource(QObject):
         print("[Mock] stop detection")
         self._timer.stop()
 
-    def send_label(self, label: int):
+    def send_label(self, side: str, label: int):
         """发送人工标注结果（数据集标注模式用）"""
         label_text = "OK" if label == 1 else "NG"
-        print(f"[Mock] label submitted: {label_text} ({label})")
+        print(f"[Mock] label submitted: {side} {label_text} ({label})")
 
     def _generate_batch(self):
-        """
-        每隔 interval_ms 毫秒调用一次，生成一批模拟数据。
-
-        生成的数据特点：
-        - x: 50Hz 正弦波 + 噪声（模拟某个方向的振动）
-        - y: 120Hz 正弦波 + 噪声
-        - z: 80Hz 正弦波 + 噪声
-        - 电流: 缓慢漂移 + 噪声（模拟电流的自然波动）
-        """
+        """生成左右两组模拟数据，每组 x/y/z/current"""
         if not self._running:
             return
 
         times = []
-        xs, ys, zs, currents = [], [], [], []
+        l_xs, l_ys, l_zs, l_currents = [], [], [], []
+        r_xs, r_ys, r_zs, r_currents = [], [], [], []
 
         for _ in range(self.batch_size):
             t = self._time
             times.append(round(t, 6))
 
-            # x 方向：chirp 信号，频率从 10Hz 二次曲线扫到 100Hz
-            # MATLAB: chirp(t, 10, 1, 100, 'q')
-            # 瞬时频率 f(t) = f0 + (f1-f0)*(t/t1)^2
-            # 相位 φ(t) = 2π * (f0*t + (f1-f0)*t^3 / (3*t1^2))
+            # ---- 左侧：chirp 信号 10→100Hz (x), 120Hz(y), 80Hz(z) ----
             f0, f1, t1 = 10, 100, 1.0
-            phase = 2 * math.pi * (f0 * t + (f1 - f0) * t ** 3 / (3 * t1 ** 2))
-            xs.append(math.sin(phase) * 0.8 + random.gauss(0, 0.1))
-
-            # y 方向：120Hz 主频 + 谐波(240Hz) + 噪声
-            ys.append(
+            l_phase = 2 * math.pi * (f0 * t + (f1 - f0) * t ** 3 / (3 * t1 ** 2))
+            l_xs.append(math.sin(l_phase) * 0.8 + random.gauss(0, 0.1))
+            l_ys.append(
                 math.sin(2 * math.pi * 120 * t) * 0.5
                 + math.sin(2 * math.pi * 240 * t) * 0.15
                 + random.gauss(0, 0.15)
             )
-            # z 方向：80Hz 主频 + 谐波(160Hz, 320Hz) + 噪声
-            zs.append(
+            l_zs.append(
                 math.sin(2 * math.pi * 80 * t) * 0.6
                 + math.sin(2 * math.pi * 160 * t) * 0.2
                 + math.sin(2 * math.pi * 320 * t) * 0.08
                 + random.gauss(0, 0.18)
             )
-            # 电流：基础值 1.5A + 缓慢波动 + 噪声
-            currents.append(1.5 + 0.3 * math.sin(2 * math.pi * 5 * t) + random.gauss(0, 0.05))
+            l_currents.append(1.5 + 0.3 * math.sin(2 * math.pi * 5 * t) + random.gauss(0, 0.05))
 
-            self._time += self._dt  # 时间前进一个步长
+            # ---- 右侧：chirp 信号 30→150Hz (x), 90Hz(y), 60Hz(z)，略有差异 ----
+            f0_r, f1_r = 30, 150
+            r_phase = 2 * math.pi * (f0_r * t + (f1_r - f0_r) * t ** 3 / (3 * t1 ** 2))
+            r_xs.append(math.sin(r_phase) * 0.7 + random.gauss(0, 0.1))
+            r_ys.append(
+                math.sin(2 * math.pi * 90 * t) * 0.55
+                + math.sin(2 * math.pi * 180 * t) * 0.2
+                + random.gauss(0, 0.12)
+            )
+            r_zs.append(
+                math.sin(2 * math.pi * 60 * t) * 0.65
+                + math.sin(2 * math.pi * 120 * t) * 0.15
+                + math.sin(2 * math.pi * 240 * t) * 0.06
+                + random.gauss(0, 0.16)
+            )
+            r_currents.append(1.8 + 0.25 * math.sin(2 * math.pi * 6 * t) + random.gauss(0, 0.04))
 
-        # 发射信号，把这批数据传给 MainWindow
+            self._time += self._dt
+
         self.data_received.emit({
             "type": "data_batch",
-            "obj_id": self._obj_id,
             "time": times,
-            "x": xs,
-            "y": ys,
-            "z": zs,
-            "current": currents,
+            "left_x": l_xs, "left_y": l_ys, "left_z": l_zs, "left_current": l_currents,
+            "right_x": r_xs, "right_y": r_ys, "right_z": r_zs, "right_current": r_currents,
         })
 
     def _emit_result(self):
-        """返回模拟的检测结果"""
+        """返回模拟的双侧检测结果"""
         if self._running:
+            # 左侧结果
             self.result_received.emit({
                 "type": "result",
-                "obj_id": self._obj_id,
-                "result": "OK",           # OK=合格, NG=不合格
-                "score": 0.96,            # 置信度 96%
-                "message": "检测合格",
+                "side": "left",
+                "result": "OK",
+                "score": 0.96,
+                "message": "左侧检测合格",
+            })
+            # 右侧结果
+            self.result_received.emit({
+                "type": "result",
+                "side": "right",
+                "result": "NG",
+                "score": 0.32,
+                "message": "右侧检测不合格",
             })

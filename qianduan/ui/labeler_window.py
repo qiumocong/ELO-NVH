@@ -1,24 +1,34 @@
 """
-数据集标注主窗口
+数据集标注主窗口 — 双组数据版本
 
-作用：提供人工标注界面，用于制作训练数据集。
-
-和 MainWindow 的区别：
-- 没有模型选择（不需要选模型）
-- 没有工件 ID 显示（标注时不需要）
-- 左侧面板改为人工标注按钮（合格/不合格）
-- 保留所有时域曲线和频谱图（人工观察用）
+布局结构：
+┌─────────────────────────────────────────────────────────────────┐
+│  StatusBarWidget                                                  │
+├──────────┬─────────────────────┬─────────────────────────────────┤
+│ 左侧标注  │ 左X时域 │ 左X频谱   │ 右X时域 │ 右X频谱               │
+│ [合格]    ├─────────────────────┼─────────────────────────────────┤
+│ [不合格]  │ 左Y时域 │ 左Y频谱   │ 右Y时域 │ 右Y频谱               │
+│ [确认]    ├─────────────────────┼─────────────────────────────────┤
+│          │ 左Z时域 │ 左Z频谱   │ 右Z时域 │ 右Z频谱               │
+│ ──────── ├─────────────────────┼─────────────────────────────────┤
+│ 右侧标注  │ 左电流              │ 右电流                           │
+│ [合格]    │                     │                                   │
+│ [不合格]  │                     │                                   │
+│ [确认]    │                     │                                   │
+└──────────┴─────────────────────┴─────────────────────────────────┘
 """
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QFrame
 )
-from PyQt5.QtCore import Qt
-from config import CHANNELS, VIBRATION_CHANNELS
+from config import VIBRATION_CHANNELS
 from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.labeler_panel import LabelerPanel
+
+SIDES = ["left", "right"]
+ALL_CHANNELS = ["x", "y", "z", "current"]
 
 
 class LabelerWindow(QMainWindow):
@@ -27,11 +37,12 @@ class LabelerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("数据集标注工具")
-        self.setMinimumSize(1200, 700)
-        self.resize(1400, 800)
+        self.setMinimumSize(1400, 800)
+        self.resize(1600, 900)
 
-        self._charts = {}
-        self._spectrum_charts = {}
+        self._charts = {side: {} for side in SIDES}
+        self._spectrum_charts = {side: {} for side in SIDES}
+
         self._setup_ui()
 
     def _setup_ui(self):
@@ -41,11 +52,10 @@ class LabelerWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- 状态栏（连接状态 + 检测状态改为"标注模式"）---
+        # --- 状态栏 ---
         self._status_bar = StatusBarWidget()
         main_layout.addWidget(self._status_bar)
 
-        # 分隔线
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet("color: #ddd;")
@@ -57,77 +67,96 @@ class LabelerWindow(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        # --- 左侧：标注面板 ---
+        # ========== 左侧面板：双标注面板 ==========
         left_panel = QWidget()
         left_panel.setFixedWidth(400)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(12, 20, 12, 12)
+        left_layout.setSpacing(4)
 
-        self._labeler_panel = LabelerPanel()
-        left_layout.addWidget(self._labeler_panel)
+        # 左侧标注面板
+        self._labeler_left = LabelerPanel("left")
+        left_layout.addWidget(self._labeler_left, stretch=1)
+
+        # 分隔
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.HLine)
+        sep2.setStyleSheet("color: #ccc;")
+        left_layout.addWidget(sep2)
+
+        # 右侧标注面板
+        self._labeler_right = LabelerPanel("right")
+        left_layout.addWidget(self._labeler_right, stretch=1)
 
         content_layout.addWidget(left_panel)
 
-        # --- 右侧：图表区，4 行布局 ---
+        # ========== 右侧图表区：双组 4 行 ==========
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.setSpacing(6)
 
-        # 前3行：X/Y/Z 各一行，左侧时域图，右侧频谱图
-        for ch in VIBRATION_CHANNELS:  # ["x", "y", "z"]
+        # X/Y/Z 三行：每行 左时域+左频谱 | 右时域+右频谱
+        for ch in VIBRATION_CHANNELS:
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
 
-            time_chart = TimeChart(ch)
-            self._charts[ch] = time_chart
-            row_layout.addWidget(time_chart, stretch=1)
+            for side in SIDES:
+                time_chart = TimeChart(f"{side}_{ch}")
+                self._charts[side][ch] = time_chart
+                row_layout.addWidget(time_chart, stretch=1)
 
-            spectrum_chart = SpectrumChart(ch)
-            self._spectrum_charts[ch] = spectrum_chart
-            row_layout.addWidget(spectrum_chart, stretch=1)
+                spectrum_chart = SpectrumChart(f"{side}_{ch}")
+                self._spectrum_charts[side][ch] = spectrum_chart
+                row_layout.addWidget(spectrum_chart, stretch=1)
 
             right_layout.addWidget(row, stretch=1)
 
-        # 第4行：电流时域图，独占整行
-        current_chart = TimeChart("current")
-        self._charts["current"] = current_chart
-        right_layout.addWidget(current_chart, stretch=1)
+        # 电流行：左电流 | 右电流
+        current_row = QWidget()
+        current_layout = QHBoxLayout(current_row)
+        current_layout.setContentsMargins(0, 0, 0, 0)
+        current_layout.setSpacing(6)
+        for side in SIDES:
+            chart = TimeChart(f"{side}_current")
+            self._charts[side]["current"] = chart
+            current_layout.addWidget(chart, stretch=1)
+        right_layout.addWidget(current_row, stretch=1)
 
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content, stretch=1)
 
     def connect_data_source(self, source):
-        """连接数据源"""
         source.data_received.connect(self._on_data)
         source.connection_changed.connect(self._on_connection_changed)
-        # 用户标注后，发送标签给数据源（数据源负责转发给后端）
-        self._labeler_panel.label_submitted.connect(source.send_label)
+        self._labeler_left.label_submitted.connect(source.send_label)
+        self._labeler_right.label_submitted.connect(source.send_label)
 
     def _on_data(self, msg: dict):
-        """处理传感器数据（和 MainWindow 一样）"""
         times = msg.get("time", [])
         if not times:
             t = msg.get("timestamp", 0)
             times = [t]
-            for ch in CHANNELS:
-                val = msg.get(ch)
-                if val is not None:
-                    self._charts[ch].add_data([t], [val])
+            for side in SIDES:
+                for ch in ALL_CHANNELS:
+                    val = msg.get(f"{side}_{ch}")
+                    if val is not None:
+                        self._charts[side][ch].add_data([t], [val])
         else:
-            for ch in CHANNELS:
-                values = msg.get(ch, [])
-                if values:
-                    self._charts[ch].add_data(times, values)
+            for side in SIDES:
+                for ch in ALL_CHANNELS:
+                    values = msg.get(f"{side}_{ch}", [])
+                    if values:
+                        self._charts[side][ch].add_data(times, values)
 
-        # 更新频谱图
-        for ch in VIBRATION_CHANNELS:
-            chart = self._charts[ch]
-            if len(chart._values) >= 16:
-                self._spectrum_charts[ch].update_from_time_data(list(chart._values))
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                chart = self._charts[side][ch]
+                if len(chart._values) >= 16:
+                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values))
 
     def _on_connection_changed(self, connected: bool):
         self._status_bar.set_connected(connected)
