@@ -41,8 +41,8 @@ def slmp_comprehensive_demo():
     slmp_client = pymcprotocol.Type3E()
     slmp_client.setaccessopt(commtype="binary")
 
-    plc_ip = "192.168.1.100"
-    plc_port = 5000
+    plc_ip = "192.168.3.124"
+    plc_port = 1025
 
     try:
         slmp_client.connect(plc_ip, plc_port)
@@ -53,7 +53,7 @@ def slmp_comprehensive_demo():
         # ==========================================
         print("--- [测试 1: 整数读写] ---")
         reg_int = "D200"
-        test_val = 9999
+        test_val = 1
         slmp_client.batchwrite_wordunits(headdevice=reg_int, values=[test_val])
         print(f"👉 发送: 向 {reg_int} 写入整数 [{test_val}]")
 
