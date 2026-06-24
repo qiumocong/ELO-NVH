@@ -20,7 +20,7 @@ total_samples = int(sample_rate * collect_total_time)
 ch_9234 = "cDAQ1Mod1/ai0:3"     # 4通道加速度计
 ch_9239 = "cDAQ1Mod2/ai0:3"     # 4通道电压
 
-range_9234_accel = (-490.0, 490.0)
+range_9234_accel = (-50.0, 50.0)
 range_9239 = (-10.0, 10.0)         # 电压量程 V
 
 # 输出路径配置
@@ -71,7 +71,7 @@ try:
         physical_channel=ch_9234,
         min_val=range_9234_accel[0],
         max_val=range_9234_accel[1],
-        sensitivity=99.8,
+        sensitivity=100,
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,                                  # 开启 2mA 恒流源供电

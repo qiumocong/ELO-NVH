@@ -1,9 +1,9 @@
 import pymcprotocol
 import time
-from config import *
+from config import PLC_IP, PLC_PORT, STATIONS
 
 class PLCClient:
-    def __init__(self, ip, port):
+    def __init__(self, ip=PLC_IP, port=PLC_PORT):
         self.ip = ip
         self.port = port
         self.client = None
@@ -12,33 +12,27 @@ class PLCClient:
         self.client = pymcprotocol.Type3E()
         self.client.setaccessopt(commtype="binary")
         self.client.connect(self.ip, self.port)
-        print(f"[PLC] 连接成功 {self.ip}:{self.port}")
+        print(f"[PLC] 连接 {self.ip}:{self.port} 成功")
 
     def close(self):
         if self.client:
             self.client.close()
             print("[PLC] 连接关闭")
 
-    def read_word(self, register):
-        """读取单个字寄存器"""
-        return self.client.batchread_wordunits(register, 1)[0]
+    def read_word(self, reg):
+        return self.client.batchread_wordunits(reg, 1)[0]
 
-    def write_word(self, register, value):
-        """写入单个字寄存器"""
-        self.client.batchwrite_wordunits(register, [value])
+    def write_word(self, reg, val):
+        self.client.batchwrite_wordunits(reg, [val])
 
-    def read_words(self, register, count):
-        """读取多个字"""
-        return self.client.batchread_wordunits(register, count)
+    def read_words(self, reg, count):
+        return self.client.batchread_wordunits(reg, count)
 
-    def write_words(self, register, values):
-        """写入多个字"""
-        self.client.batchwrite_wordunits(register, values)
+    def write_words(self, reg, vals):
+        self.client.batchwrite_wordunits(reg, vals)
 
-    def read_barcode(self, start_reg, max_len=20):
-        """读取条码字符串（最多 max_len 个字）"""
+    def read_barcode(self, start_reg, max_len=40):
         words = self.read_words(start_reg, max_len)
-        # 转换为字符串（小端模式）
         text = ""
         for w in words:
             low = w & 0xFF
@@ -49,13 +43,34 @@ class PLCClient:
             if high == 0:
                 break
             text += chr(high)
-        return text.strip()
+        return text.strip('\x00')
 
-    def wait_for_step(self, target_step, timeout=10.0, poll_interval=0.1):
-        """等待 PLC 步骤变为 target_step，超时返回 False"""
-        start = time.time()
-        while time.time() - start < timeout:
-            if self.read_word(PLC_STEP_REG) == target_step:
-                return True
-            time.sleep(poll_interval)
-        return False
+    def read_product_spec(self, max_len=10):
+        words = self.read_words("R11", max_len)
+        text = ""
+        for w in words:
+            low = w & 0xFF
+            high = (w >> 8) & 0xFF
+            if low == 0:
+                break
+            text += chr(low)
+            if high == 0:
+                break
+            text += chr(high)
+        return text.strip('\x00')
+
+    def read_mode(self):
+        return self.read_word("R10")
+
+    # ---- 工位操作 ----
+    def read_station_step(self, name):
+        return self.read_word(STATIONS[name]["plc_step_reg"])
+
+    def write_pc_step(self, name, val):
+        self.write_word(STATIONS[name]["pc_step_reg"], val)
+
+    def read_manual_result(self, name):
+        return self.read_word(STATIONS[name]["manual_result_reg"])
+
+    def write_auto_result(self, name, val):
+        self.write_word(STATIONS[name]["auto_result_reg"], val)
