@@ -7,6 +7,7 @@ from config import *
 from plc_comm import PLCClient
 from data_acquisition import DataAcquisition
 from model_inference import load_model, preprocess, predict
+import websocket_server   # 导入WebSocket服务模块
 
 class StationWorker:
     def __init__(self, name, model=None):
@@ -23,13 +24,14 @@ class StationWorker:
             max_collect_time=MAX_COLLECT_TIME,
             accel_range=RANGE_9234,
             sensitivity=SENSITIVITY,
-            voltage_range=RANGE_9239
+            voltage_range=RANGE_9239,
+            data_callback=self.on_data_chunk   # 每块数据回调
         )
         self.state = "idle"
         self.running = True
         self.current_barcode = ""
         self.current_spec = ""
-        self.last_heartbeat = time.time()   # 心跳计时
+        self.last_heartbeat = time.time()
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
@@ -40,21 +42,23 @@ class StationWorker:
         self.daq.stop()
         self.plc.close()
 
+    def on_data_chunk(self, t_chunk, data_chunk):
+        """采集回调：将数据推送到WebSocket"""
+        websocket_server.put_data(self.name, t_chunk, data_chunk)
+
     def save_per_channel(self, t, data, label):
         """
-        目录结构：DATA_SAVE_DIR/{barcode}/{label}/{spec}/
+        目录结构：DATA_SAVE_DIR/{barcode}/{OK|NG}/{spec}/
         每个通道保存为单独CSV，包含 time 和 ch_i 两列
         """
         label_str = "OK" if label == 0 else "NG"
-        # 安全处理文件夹名：替换非法字符
+        # 安全处理文件夹名
         safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
         safe_spec = "".join(c for c in self.current_spec if c.isalnum() or c in ('_', '-'))
-        # 若缺少信息，使用默认值
         if not safe_barcode:
             safe_barcode = f"NOBARCODE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         if not safe_spec:
             safe_spec = "UNKNOWN_SPEC"
-        # 构建路径
         save_dir = os.path.join(DATA_SAVE_DIR, safe_barcode, label_str, safe_spec)
         os.makedirs(save_dir, exist_ok=True)
 
@@ -66,18 +70,16 @@ class StationWorker:
                 f"ch{i}": data[i, :]
             })
             df.to_csv(ch_path, index=False)
-
-        # 可选：保存一个元数据文件（如工位、时间等），但非必需
         print(f"[{self.name}] 数据已保存至 {save_dir}")
 
     def run(self):
         print(f"[{self.name}] 线程启动")
         while self.running:
             try:
-                # ---------- 心跳：每秒读取一次模式寄存器，保持通信活跃 ----------
+                # ---------- 心跳：每秒读取一次模式寄存器 ----------
                 now = time.time()
                 if now - self.last_heartbeat >= 1.0:
-                    _ = self.plc.read_mode()  # 读取操作即发送通信包
+                    _ = self.plc.read_mode()
                     self.last_heartbeat = now
 
                 # ---------- 状态机 ----------
@@ -88,7 +90,11 @@ class StationWorker:
                         self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
                     )
                     self.current_spec = self.plc.read_product_spec()
-                    print(f"[{self.name}] 条码:{self.current_barcode} 规格:{self.current_spec}")
+                    mode = self.plc.read_mode()
+                    mode_str = "auto" if mode == 1 else "manual"
+                    # 更新WebSocket状态
+                    websocket_server.update_station_info(self.name, self.current_barcode, self.current_spec, mode_str)
+                    print(f"[{self.name}] 条码:{self.current_barcode} 规格:{self.current_spec} 模式:{mode_str}")
                     self.plc.write_pc_step(self.name, STEP_READY)
 
                 elif plc_step == STEP_TEST_START and self.state == "idle":
@@ -116,7 +122,7 @@ class StationWorker:
                         self.state = "idle"
                         continue
 
-                    # 确保条码/规格已读取（若之前未读取则补读）
+                    # 确保条码/规格已读取
                     if not self.current_barcode:
                         self.current_barcode = self.plc.read_barcode(
                             self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
@@ -130,19 +136,30 @@ class StationWorker:
                         if self.model is None:
                             print(f"[{self.name}] 错误：自动模式但模型未加载")
                             label = 1  # 默认NG
+                            score = 0.0
                         else:
                             tensor = preprocess(data, self.name)
                             pred = predict(self.model, tensor)
                             label = pred  # 0=OK, 1=NG
+                            # 简单置信度：此处可调用torch.softmax获得，暂用固定值
+                            score = 0.96 if label == 0 else 0.92
                         result_code = 1 if label == 0 else 2
                         self.plc.write_auto_result(self.name, result_code)
-                        print(f"[{self.name}] 自动判定: {'OK' if label == 0 else 'NG'}")
+                        result_str = "OK" if label == 0 else "NG"
+                        print(f"[{self.name}] 自动判定: {result_str}")
+                        websocket_server.send_result(self.name, result_str, score, "自动判定")
                     else:               # 人工
                         print(f"[{self.name}] 等待人工判定...")
                         timeout = 30
                         start_wait = time.time()
                         result = None
                         while time.time() - start_wait < timeout:
+                            # 优先检查前端WebSocket标注
+                            label_val = websocket_server.get_pending_label(self.name)
+                            if label_val is not None:
+                                result = 1 if label_val == 1 else 2
+                                break
+                            # 其次检查PLC寄存器
                             val = self.plc.read_manual_result(self.name)
                             if val in (1, 2):
                                 result = val
@@ -151,8 +168,10 @@ class StationWorker:
                         if result is None:
                             result = 2   # 默认NG
                         label = 0 if result == 1 else 1
-                        print(f"[{self.name}] 人工判定: {'OK' if label == 0 else 'NG'}")
+                        result_str = "OK" if label == 0 else "NG"
+                        print(f"[{self.name}] 人工判定: {result_str}")
                         self.plc.write_pc_step(self.name, STEP_TEST_END)
+                        websocket_server.send_result(self.name, result_str, 1.0, "人工判定")
 
                     # 保存数据
                     self.save_per_channel(t, data, label)

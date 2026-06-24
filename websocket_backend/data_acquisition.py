@@ -6,10 +6,13 @@ import threading
 
 class DataAcquisition:
     def __init__(self, accel_channels, voltage_channels, sample_rate, chunk_samples, max_collect_time,
-                 accel_range=(-50.0, 50.0), sensitivity=100, voltage_range=(-10.0, 10.0)):
+                 accel_range=(-50.0, 50.0), sensitivity=100, voltage_range=(-10.0, 10.0),
+                 data_callback=None):
         """
         accel_channels: 加速度计通道字符串，如 "cDAQ1Mod1/ai0:1"
         voltage_channels: 电压通道字符串，如 "cDAQ1Mod2/ai0:1"
+        data_callback: 每采集一块数据时调用 callback(t_chunk, data_chunk)
+                       data_chunk shape: (total_channels, samples)
         """
         self.sr = sample_rate
         self.chunk = chunk_samples
@@ -19,32 +22,32 @@ class DataAcquisition:
         self.sensitivity = sensitivity
         self.voltage_range = voltage_range
         self.max_samples = int(self.sr * max_collect_time)
+        self.data_callback = data_callback
 
         self.is_running = False
         self.thread = None
         self.full_t = None
-        self.full_data = None   # 合并所有通道，顺序：[accel通道..., voltage通道...]
+        self.full_data = None
         self.sample_count = 0
+
+        # 解析通道数量
+        def count_channels(ch_str):
+            if ':' in ch_str:
+                start, end = ch_str.split(':')
+                start_num = int(''.join(filter(str.isdigit, start.split('/')[-1])))
+                end_num = int(''.join(filter(str.isdigit, end)))
+                return end_num - start_num + 1
+            else:
+                return 1
+        self.num_accel = count_channels(self.accel_ch)
+        self.num_voltage = count_channels(self.voltage_ch)
+        self.total_channels = self.num_accel + self.num_voltage
 
     def start(self):
         if self.is_running:
             return
         self.is_running = True
         self.full_t = np.empty(self.max_samples, dtype=np.float64)
-        # 计算总通道数：解析通道字符串中的通道个数（假定格式为"mod/aiM:N"）
-        def count_channels(ch_str):
-            # 简单解析，如 "cDAQ1Mod1/ai0:1" -> 2
-            if ':' in ch_str:
-                start, end = ch_str.split(':')
-                # 提取数字部分
-                start_num = int(''.join(filter(str.isdigit, start.split('/')[-1])))
-                end_num = int(''.join(filter(str.isdigit, end)))
-                return end_num - start_num + 1
-            else:
-                return 1  # 单个通道
-        self.num_accel = count_channels(self.accel_ch)
-        self.num_voltage = count_channels(self.voltage_ch)
-        self.total_channels = self.num_accel + self.num_voltage
         self.full_data = np.empty((self.total_channels, self.max_samples), dtype=np.float64)
         self.sample_count = 0
         self.thread = threading.Thread(target=self._acq_loop, daemon=True)
@@ -108,14 +111,26 @@ class DataAcquisition:
                 if end > self.max_samples:
                     end = self.max_samples
                     actual = end - start
+                    t_chunk = np.linspace(start/self.sr, end/self.sr, actual, endpoint=False)
+                    # 合并数据
+                    data_chunk = np.vstack([buf_accel[:, :actual], buf_voltage[:, :actual]])
+                    # 保存到full
                     self.full_data[0:self.num_accel, start:end] = buf_accel[:, :actual]
                     self.full_data[self.num_accel:, start:end] = buf_voltage[:, :actual]
                     self.sample_count = end
+                    self.full_t[start:end] = t_chunk
+                    if self.data_callback:
+                        self.data_callback(t_chunk, data_chunk)
                     break
-                self.full_data[0:self.num_accel, start:end] = buf_accel
-                self.full_data[self.num_accel:, start:end] = buf_voltage
-                self.sample_count = end
-                self.full_t[start:end] = np.linspace(start/self.sr, end/self.sr, end-start, endpoint=False)
+                else:
+                    t_chunk = np.linspace(start/self.sr, end/self.sr, self.chunk, endpoint=False)
+                    data_chunk = np.vstack([buf_accel, buf_voltage])
+                    self.full_data[0:self.num_accel, start:end] = buf_accel
+                    self.full_data[self.num_accel:, start:end] = buf_voltage
+                    self.sample_count = end
+                    self.full_t[start:end] = t_chunk
+                    if self.data_callback:
+                        self.data_callback(t_chunk, data_chunk)
 
         except Exception as e:
             print(f"[采集] 错误: {e}")

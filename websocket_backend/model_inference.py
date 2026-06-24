@@ -19,4 +19,5 @@ def preprocess(data_8ch, station_name):
 def predict(model, tensor):
     with torch.no_grad():
         logits = model(tensor.to(DEVICE))
+        # 简单返回argmax，置信度可通过softmax获得，此处暂未实现
         return torch.argmax(logits, dim=1).item()   # 0=OK, 1=NG
