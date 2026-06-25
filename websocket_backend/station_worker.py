@@ -6,13 +6,13 @@ import threading
 from config import *
 from plc_comm import PLCClient
 from data_acquisition import DataAcquisition
-from model_inference import load_model, preprocess, predict
+from model_inference import get_model_for_spec, preprocess, predict
 import websocket_server   # 导入WebSocket服务模块
 
 class StationWorker:
-    def __init__(self, name, model=None):
+    def __init__(self, name):
         self.name = name
-        self.model = model
+        self.model = None
         self.station_cfg = STATIONS[name]
         self.plc = PLCClient(PLC_IP, PLC_PORT)
         self.plc.connect()
@@ -90,8 +90,15 @@ class StationWorker:
                         self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
                     )
                     self.current_spec = self.plc.read_product_spec()
-                    mode = self.plc.read_mode()
-                    mode_str = "auto" if mode == 1 else "manual"
+                    # ---- 根据规格动态加载模型 ----
+                    mode_now = self.plc.read_mode()
+                    mode_str = "auto" if mode_now == 1 else "manual"
+                    if mode_now == 1:  # 自动模式
+                        self.model = get_model_for_spec(self.current_spec)
+                        print(f"[{self.name}] 已加载规格 {self.current_spec} 的模型")
+                    else:
+                        self.model = None
+                        print(f"[{self.name}] 人工模式，不加载模型")
                     # 更新WebSocket状态
                     websocket_server.update_station_info(self.name, self.current_barcode, self.current_spec, mode_str)
                     print(f"[{self.name}] 条码:{self.current_barcode} 规格:{self.current_spec} 模式:{mode_str}")
@@ -139,10 +146,8 @@ class StationWorker:
                             score = 0.0
                         else:
                             tensor = preprocess(data, self.name)
-                            pred = predict(self.model, tensor)
+                            pred, score = predict(self.model, tensor)
                             label = pred  # 0=OK, 1=NG
-                            # 简单置信度：此处可调用torch.softmax获得，暂用固定值
-                            score = 0.96 if label == 0 else 0.92
                         result_code = 1 if label == 0 else 2
                         self.plc.write_auto_result(self.name, result_code)
                         result_str = "OK" if label == 0 else "NG"

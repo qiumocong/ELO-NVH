@@ -1,7 +1,6 @@
 import time
 from config import *
 from station_worker import StationWorker
-from model_inference import load_model
 from plc_comm import PLCClient
 from heartbeat import Heartbeat
 import threading
@@ -13,25 +12,20 @@ def start_ws():
 def main():
     ws_thread = threading.Thread(target=start_ws, daemon=True)
     ws_thread.start()
-    # 启动心跳
+    # 启动心跳（用于保持PLC连接）
     heartbeat = Heartbeat()
     heartbeat.start()
 
-    # 判断模式
+    # 仅判断模式，不预加载模型
     plc_temp = PLCClient(PLC_IP, PLC_PORT)
     plc_temp.connect()
     mode = plc_temp.read_mode()
     plc_temp.close()
-    model = None
-    if mode == 1:
-        model = load_model()
-        print("[主程序] 自动模式，模型已加载")
-    else:
-        print("[主程序] 人工模式")
+    print(f"[主程序] 当前模式: {'自动' if mode == 1 else '人工'}")
 
-    # 创建左右工位工作线程
-    left_worker = StationWorker("left", model)
-    right_worker = StationWorker("right", model)
+    # 创建工位线程，不传入模型
+    left_worker = StationWorker("left")
+    right_worker = StationWorker("right")
 
     print("[主程序] 双工位已启动，按 Ctrl+C 退出")
     try:
