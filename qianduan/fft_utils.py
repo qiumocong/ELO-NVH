@@ -13,6 +13,8 @@ STFT 短时傅里叶变换工具模块
 - 值 = 该时刻该频率的能量（幅值）
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 
