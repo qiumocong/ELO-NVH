@@ -14,7 +14,7 @@ PLC_PRODUCT_REG = "R11"        # 规格名（10个字）
 
 # ---------- 心跳 ----------
 HEARTBEAT_REG = "R999"        # 心跳寄存器（公共）
-HEARTBEAT_INTERVAL = 1.0      # 心跳间隔（秒）
+HEARTBEAT_INTERVAL = 3.0      # 心跳间隔（秒），增加到3秒
 
 # 工位配置
 STATIONS = {
@@ -23,11 +23,11 @@ STATIONS = {
         "barcode_len": 40,
         "plc_cmd_reg": "R140",        # PLC写入命令，PC读取
         "pc_status_reg": "R150",      # PC写入状态，PLC读取
-        "plc_data_reg": "R160",       # PLC写入其他数据
         "pc_result_reg": "R151",      # PC写入结果，PLC读取
         "pc_result_ready": "R152",    # PC结果就绪标志
         "manual_result_reg": "R141",  # PLC写入人工判定，PC读取
         "reset_reg": "R30.1",         # 重置信号寄存器 (bit)
+        "data_ready_reg": "R30.3",    # 数据就绪信号 (bit)
         "accel_channels": "cDAQ1Mod1/ai0:2",
         "voltage_channel": "cDAQ1Mod3/ai0",
         "current_channel": "cDAQ1Mod3/ai2",
@@ -38,11 +38,11 @@ STATIONS = {
         "barcode_len": 40,
         "plc_cmd_reg": "R240",
         "pc_status_reg": "R250",
-        "plc_data_reg": "R260",
         "pc_result_reg": "R251",
         "pc_result_ready": "R252",
         "manual_result_reg": "R241",
-        "reset_reg": "R30.2",         # 重置信号寄存器 (bit)
+        "reset_reg": "R30.2",
+        "data_ready_reg": "R30.4",
         "accel_channels": "cDAQ1Mod2/ai0:2",
         "voltage_channel": "cDAQ1Mod3/ai1",
         "current_channel": "cDAQ1Mod3/ai3",
@@ -50,7 +50,7 @@ STATIONS = {
     }
 }
 
-# PLC命令定义 (PLC写入, PC读取)
+# PLC命令定义
 PLC_CMD_IDLE = 0
 PLC_CMD_READY = 100
 PLC_CMD_START = 200
@@ -58,7 +58,7 @@ PLC_CMD_FIRST_END = 300
 PLC_CMD_SECOND_START = 400
 PLC_CMD_STOP = 900
 
-# PC状态定义 (PC写入, PLC读取)
+# PC状态定义
 PC_STATUS_IDLE = 0
 PC_STATUS_READY = 100
 PC_STATUS_COLLECTING = 200
@@ -70,8 +70,8 @@ MODEL_IN_CH = len(STATIONS["left"]["input_indices"])
 MODEL_NUM_CLASSES = 2
 
 # ---------- NI 采集 ----------
-SAMPLE_RATE = 4800
-CHUNK_SAMPLES = 1000
+SAMPLE_RATE = 2400              # 降低采样率减少CPU占用
+CHUNK_SAMPLES = 500             # 降低块大小
 MAX_COLLECT_TIME = 60.0
 RANGE_9234 = (-50.0, 50.0)
 SENSITIVITY = 100

@@ -5,7 +5,7 @@ from datetime import datetime
 import threading
 from config import *
 from plc_manager import plc_manager
-from shared_data_acquisition import shared_daq  # 使用共享采集
+from shared_data_acquisition import shared_daq
 from model_inference import get_model_for_spec, preprocess, predict
 import websocket_server
 
@@ -17,7 +17,6 @@ class StationWorker:
         self.station_cfg = STATIONS[name]
         self.plc = plc_manager
 
-        # 注册数据回调到共享采集
         shared_daq.register_callback(self.name, self.on_data_chunk)
 
         self.running = True
@@ -25,8 +24,6 @@ class StationWorker:
         self.current_spec = ""
         self.current_mode = 0
         self.state = PC_STATUS_IDLE
-        self.collected_t = None
-        self.collected_data = None
 
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -37,7 +34,6 @@ class StationWorker:
             self.thread.join(timeout=2.0)
 
     def on_data_chunk(self, t_chunk, data_chunk):
-        """采集回调：将数据推送到WebSocket"""
         websocket_server.put_data(self.name, t_chunk, data_chunk)
 
     def save_per_channel(self, t, data, label):
@@ -53,132 +49,303 @@ class StationWorker:
 
         for i in range(data.shape[0]):
             ch_path = os.path.join(save_dir, f"ch{i}.csv")
-            df = pd.DataFrame({
-                "time": t,
-                f"ch{i}": data[i, :]
-            })
+            df = pd.DataFrame({"time": t, f"ch{i}": data[i, :]})
             df.to_csv(ch_path, index=False)
         print(f"[{self.name}] 数据已保存至 {save_dir}")
 
-    def wait_for_command(self, target_cmd, timeout=None, poll_interval=0.1):
-        """等待PLC发送指定命令"""
+    def read_plc_data(self):
+        self.current_barcode = self.plc.read_barcode(
+            self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
+        )
+        self.current_spec = self.plc.read_product_spec()
+        self.current_mode = self.plc.read_mode()
+        mode_str = "auto" if self.current_mode == 1 else "manual"
+
+        print(f"[{self.name}] 条码: {self.current_barcode}")
+        print(f"[{self.name}] 规格: {self.current_spec}")
+        print(f"[{self.name}] 模式: {mode_str}")
+
+        if self.current_mode == 1 and self.current_spec:
+            self.model = get_model_for_spec(self.current_spec)
+            print(f"[{self.name}] 已加载模型: {self.current_spec}")
+        else:
+            self.model = None
+
+        websocket_server.update_station_info(
+            self.name, self.current_barcode, self.current_spec, mode_str
+        )
+
+    def wait_for_condition(self, target_cmd=None, check_signals=True, timeout=None, poll_interval=0.1):
         start = time.time()
+        error_count = 0
+
         while self.running:
             try:
-                cmd = self.plc.read_plc_command(self.name)
-                if cmd == target_cmd:
-                    return True, cmd
-                if cmd != PLC_CMD_IDLE and cmd != 0:
-                    pass  # 忽略非目标命令
+                if check_signals:
+                    reset = self.plc.read_reset_signal(self.name)
+                    if reset:
+                        reg = "R30.1" if self.name == "left" else "R30.2"
+                        print(f"[{self.name}] 重置信号触发 ({reg}=1)")
+                        return "reset", None
+
+                    ready = self.plc.read_data_ready(self.name)
+                    if ready:
+                        reg = "R30.3" if self.name == "left" else "R30.4"
+                        print(f"[{self.name}] 数据就绪信号触发 ({reg}=1)")
+                        return "data_ready", None
+
+                if target_cmd is not None:
+                    cmd = self.plc.read_plc_command(self.name)
+                    if cmd == target_cmd:
+                        return "cmd", cmd
+
+                error_count = 0
+
             except Exception as e:
-                print(f"[{self.name}] 等待命令异常: {e}")
+                error_count += 1
+                error_msg = str(e)
+                if "10053" in error_msg or "10054" in error_msg or "连接" in error_msg:
+                    if error_count >= 3:
+                        print(f"[{self.name}] 连续错误，等待恢复...")
+                        time.sleep(3)
+                        error_count = 0
+                    else:
+                        time.sleep(0.5)
+                    continue
+                else:
+                    print(f"[{self.name}] 等待条件异常: {e}")
+
             if timeout is not None and time.time() - start > timeout:
-                return False, None
+                return "timeout", None
+
             time.sleep(poll_interval)
-        return False, None
+
+        return "stopped", None
+
+    def reset_flow(self):
+        print(f"[{self.name}] 重置流程...")
+        try:
+            shared_daq.stop()
+        except:
+            pass
+        self.state = PC_STATUS_IDLE
+
+    def _do_inference(self, data):
+        """
+        执行推理判定
+        返回: (label, score)
+        label: 0=OK, 1=NG
+        """
+        label = 0
+        score = 0.0
+
+        if self.current_mode == 1:  # 自动
+            if self.model is None:
+                print(f"[{self.name}] 错误: 模型未加载")
+                label = 1
+            else:
+                tensor = preprocess(data, self.name)
+                pred, score = predict(self.model, tensor)
+                label = pred
+
+            result_str = "OK" if label == 0 else "NG"
+            print(f"[{self.name}] 自动判定: {result_str} (置信度 {score:.3f})")
+            websocket_server.send_result(self.name, result_str, score, "自动判定")
+
+        else:  # 人工
+            print(f"[{self.name}] 等待人工判定...")
+            timeout = 30
+            start_wait = time.time()
+            result_val = None
+
+            while time.time() - start_wait < timeout:
+                # 人工判定期间检测重置信号
+                try:
+                    if self.plc.read_reset_signal(self.name):
+                        print(f"[{self.name}] 人工判定期间重置")
+                        self.reset_flow()
+                        raise Exception("重置信号触发")
+                except:
+                    pass
+
+                # 检查WebSocket标注
+                label_val = websocket_server.get_pending_label(self.name)
+                if label_val is not None:
+                    result_val = 1 if label_val == 1 else 2
+                    break
+
+                # 检查PLC人工结果
+                try:
+                    val = self.plc.read_manual_result(self.name)
+                    if val in (1, 2):
+                        result_val = val
+                        break
+                except:
+                    pass
+
+                time.sleep(0.5)
+
+            if result_val is None:
+                result_val = 2  # 默认NG
+
+            label = 0 if result_val == 1 else 1
+            result_str = "OK" if label == 0 else "NG"
+            print(f"[{self.name}] 人工判定: {result_str}")
+            websocket_server.send_result(self.name, result_str, 1.0, "人工判定")
+
+        return label, score
 
     def run(self):
-        print(f"[{self.name}] 线程启动 (使用共享采集)")
+        print(f"[{self.name}] 线程启动")
+        print(f"[{self.name}] 数据就绪: R30.{3 if self.name == 'left' else 4}")
+        print(f"[{self.name}] 重置信号: R30.{1 if self.name == 'left' else 2}")
 
         while self.running:
             try:
                 # ============================================================
-                # 等待PLC发送READY命令 (CMD=100)
+                # 阶段1: 等待数据就绪 或 READY命令
                 # ============================================================
-                print(f"[{self.name}] 等待PLC发送READY命令...")
-                success, cmd = self.wait_for_command(PLC_CMD_READY, timeout=None)
+                print(f"[{self.name}] 等待数据就绪信号或READY命令...")
+                reason, value = self.wait_for_condition(
+                    target_cmd=PLC_CMD_READY,
+                    check_signals=True
+                )
 
-                if not success or not self.running:
+                if reason == "stopped" or not self.running:
+                    break
+
+                if reason == "reset":
+                    self.reset_flow()
                     continue
 
-                print(f"[{self.name}] 收到READY命令")
+                if reason == "timeout":
+                    print(f"[{self.name}] 等待超时")
+                    continue
 
-                # ---- 读取PLC发送的数据 ----
-                self.current_barcode = self.plc.read_barcode(
-                    self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
-                )
-                self.current_spec = self.plc.read_product_spec()
-                self.current_mode = self.plc.read_mode()
-                mode_str = "auto" if self.current_mode == 1 else "manual"
-
-                print(f"[{self.name}] 条码: {self.current_barcode}")
-                print(f"[{self.name}] 规格: {self.current_spec}")
-                print(f"[{self.name}] 模式: {mode_str}")
-
-                # ---- 加载模型 ----
-                if self.current_mode == 1:
-                    self.model = get_model_for_spec(self.current_spec)
-                    print(f"[{self.name}] 已加载模型: {self.current_spec}")
-                else:
-                    self.model = None
-
-                # ---- 更新WebSocket ----
-                websocket_server.update_station_info(
-                    self.name, self.current_barcode, self.current_spec, mode_str
-                )
-
-                # ---- PC回复READY状态 ----
+                # 读取数据并回复就绪
+                self.read_plc_data()
                 self.plc.write_pc_status(self.name, PC_STATUS_READY)
                 self.state = PC_STATUS_READY
-                print(f"[{self.name}] PC回复就绪 (状态={PC_STATUS_READY})")
+                print(f"[{self.name}] PC就绪 (状态={PC_STATUS_READY})")
 
                 # ============================================================
-                # 等待PLC发送START命令 (CMD=200)
+                # 阶段2: 等待START命令
                 # ============================================================
-                print(f"[{self.name}] 等待PLC发送START命令...")
-                success, cmd = self.wait_for_command(PLC_CMD_START, timeout=None)
+                print(f"[{self.name}] 等待START命令...")
+                reason, value = self.wait_for_condition(
+                    target_cmd=PLC_CMD_START,
+                    check_signals=True
+                )
 
-                if not success or not self.running:
+                if reason == "stopped" or not self.running:
+                    break
+
+                if reason == "reset":
+                    self.reset_flow()
                     continue
 
-                print(f"[{self.name}] 收到START命令")
+                if reason == "data_ready":
+                    self.read_plc_data()
+                    continue
 
-                # ---- 检查共享采集是否已启动 ----
+                if reason == "timeout":
+                    print(f"[{self.name}] 等待START超时")
+                    continue
+
+                print(f"[{self.name}] 收到START命令，开始采集...")
+
                 if not shared_daq.is_running:
-                    print(f"[{self.name}] 启动共享采集...")
                     shared_daq.start()
-                    time.sleep(0.5)  # 等待采集稳定
+                    time.sleep(0.5)
 
                 self.plc.write_pc_status(self.name, PC_STATUS_COLLECTING)
                 self.state = PC_STATUS_COLLECTING
                 print(f"[{self.name}] 采集已启动")
 
                 # ============================================================
-                # 等待PLC发送FIRST_END命令 (CMD=300)
+                # 阶段3: 等待FIRST_END命令
                 # ============================================================
-                print(f"[{self.name}] 等待PLC发送FIRST_END命令...")
-                success, cmd = self.wait_for_command(PLC_CMD_FIRST_END, timeout=None)
+                print(f"[{self.name}] 等待FIRST_END命令...")
+                reason, value = self.wait_for_condition(
+                    target_cmd=PLC_CMD_FIRST_END,
+                    check_signals=True
+                )
 
-                if not success or not self.running:
+                if reason == "stopped" or not self.running:
+                    break
+
+                if reason == "reset":
+                    self.reset_flow()
+                    continue
+
+                if reason == "data_ready":
+                    self.read_plc_data()
+                    continue
+
+                if reason == "timeout":
+                    print(f"[{self.name}] 等待FIRST_END超时")
+                    self.reset_flow()
                     continue
 
                 print(f"[{self.name}] 收到FIRST_END命令")
                 self.plc.write_pc_status(self.name, PLC_CMD_FIRST_END)
 
                 # ============================================================
-                # 等待PLC发送SECOND_START命令 (CMD=400)
+                # 阶段4: 等待SECOND_START命令
                 # ============================================================
-                print(f"[{self.name}] 等待PLC发送SECOND_START命令...")
-                success, cmd = self.wait_for_command(PLC_CMD_SECOND_START, timeout=None)
+                print(f"[{self.name}] 等待SECOND_START命令...")
+                reason, value = self.wait_for_condition(
+                    target_cmd=PLC_CMD_SECOND_START,
+                    check_signals=True
+                )
 
-                if not success or not self.running:
+                if reason == "stopped" or not self.running:
+                    break
+
+                if reason == "reset":
+                    self.reset_flow()
+                    continue
+
+                if reason == "data_ready":
+                    self.read_plc_data()
+                    continue
+
+                if reason == "timeout":
+                    print(f"[{self.name}] 等待SECOND_START超时")
+                    self.reset_flow()
                     continue
 
                 print(f"[{self.name}] 收到SECOND_START命令")
                 self.plc.write_pc_status(self.name, PLC_CMD_SECOND_START)
 
                 # ============================================================
-                # 等待PLC发送STOP命令 (CMD=900)
+                # 阶段5: 等待STOP命令
                 # ============================================================
-                print(f"[{self.name}] 等待PLC发送STOP命令...")
-                success, cmd = self.wait_for_command(PLC_CMD_STOP, timeout=None)
+                print(f"[{self.name}] 等待STOP命令...")
+                reason, value = self.wait_for_condition(
+                    target_cmd=PLC_CMD_STOP,
+                    check_signals=True
+                )
 
-                if not success or not self.running:
+                if reason == "stopped" or not self.running:
+                    break
+
+                if reason == "reset":
+                    self.reset_flow()
+                    continue
+
+                if reason == "data_ready":
+                    self.read_plc_data()
+                    continue
+
+                if reason == "timeout":
+                    print(f"[{self.name}] 等待STOP超时")
+                    self.reset_flow()
                     continue
 
                 print(f"[{self.name}] 收到STOP命令，停止采集...")
 
-                # ---- 获取该工位的采集数据 ----
+                # ---- 获取采集数据 ----
                 if self.name == "left":
                     t, data = shared_daq.get_left_data()
                 else:
@@ -187,71 +354,31 @@ class StationWorker:
                 self.state = PC_STATUS_PROCESSING
 
                 if t.size == 0:
-                    print(f"[{self.name}] 警告: 无数据")
+                    print(f"[{self.name}] 无数据")
                     self.plc.write_result(self.name, 2)
                     self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                     self.state = PC_STATUS_IDLE
                     continue
 
-                # ---- 执行判定 ----
-                label = 0
-                score = 0.0
-
-                if self.current_mode == 1:  # 自动
-                    if self.model is None:
-                        print(f"[{self.name}] 错误: 模型未加载")
-                        label = 1
-                    else:
-                        tensor = preprocess(data, self.name)
-                        pred, score = predict(self.model, tensor)
-                        label = pred
-
-                    result_code = 1 if label == 0 else 2
-                    result_str = "OK" if label == 0 else "NG"
-                    print(f"[{self.name}] 自动判定: {result_str} (置信度 {score:.3f})")
-                    websocket_server.send_result(self.name, result_str, score, "自动判定")
-
-                else:  # 人工
-                    print(f"[{self.name}] 等待人工判定...")
-                    timeout = 30
-                    start_wait = time.time()
-                    result_val = None
-
-                    while time.time() - start_wait < timeout:
-                        label_val = websocket_server.get_pending_label(self.name)
-                        if label_val is not None:
-                            result_val = 1 if label_val == 1 else 2
-                            break
-                        val = self.plc.read_manual_result(self.name)
-                        if val in (1, 2):
-                            result_val = val
-                            break
-                        time.sleep(0.5)
-
-                    if result_val is None:
-                        result_val = 2
-
-                    label = 0 if result_val == 1 else 1
-                    result_str = "OK" if label == 0 else "NG"
-                    print(f"[{self.name}] 人工判定: {result_str}")
-                    websocket_server.send_result(self.name, result_str, 1.0, "人工判定")
-
-
-
-                # ---- 写入结果到PLC ----
-                result_code = 1 if label == 0 else 2
-                self.plc.write_result(self.name, result_code)
-                print(f"[{self.name}] 结果已写入PLC: {result_code}")
-
-                # ---- PC回复完成 ----
+                # ---- 回复完成 ----
                 self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.state = PC_STATUS_IDLE
-                print(f"[{self.name}] 处理完成，等待下一次检测\n")
+                print(f"[{self.name}] 处理完成\n")
+
+                # ---- 执行推理 ----
+                label, score = self._do_inference(data)
+
+                # ---- 写入结果 ----
+                result_code = 1 if label == 0 else 2
+                self.plc.write_result(self.name, result_code)
+                print(f"[{self.name}] 结果已写入: {result_code}")
 
                 # ---- 保存数据 ----
                 self.save_per_channel(t, data, label)
 
             except Exception as e:
+                if "重置" in str(e):
+                    continue
                 print(f"[{self.name}] 异常: {e}")
                 import traceback
                 traceback.print_exc()
