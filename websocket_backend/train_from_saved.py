@@ -114,7 +114,7 @@ def evaluate(model, loader, device, phase="Validation"):
 # ---------- 训练单个规格 ----------
 def train_spec(spec_name, data_dir, model_dir):
     print(f"\n===== 训练规格: {spec_name} =====")
-    dataset = VibrationDataset(data_dir, spec_name, input_indices=[0,1], max_len=TRAIN_CONFIG["max_len"])
+    dataset = VibrationDataset(data_dir, spec_name, input_indices=[0, 1, 2], max_len=TRAIN_CONFIG["max_len"])
     if len(dataset) < TRAIN_CONFIG["min_samples_per_spec"]:
         print(f"规格 {spec_name} 样本数 {len(dataset)} 低于阈值 {TRAIN_CONFIG['min_samples_per_spec']}，跳过训练")
         return

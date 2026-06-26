@@ -25,8 +25,8 @@ def start_ws_server():
     loop.run_until_complete(ws_main())
 
 async def ws_main():
-    async with websockets.serve(handler, "0.0.0.0", 8080):
-        print("[WebSocket] 服务启动 ws://localhost:8080")
+    async with websockets.serve(handler, "0.0.0.0", 8081):
+        print("[WebSocket] 服务启动 ws://localhost:8081")
         asyncio.create_task(data_broadcast_loop())
         await asyncio.Future()  # 永久运行
 
@@ -138,17 +138,16 @@ def send_result(side, result, score, message):
 def put_data(side, time_array, data_2d):
     """
     存储最近一块数据，供广播使用
-    data_2d: (channels, samples) 顺序为加速度通道在前，电压通道在后
-    映射：第一个加速度通道 -> x, 第二个 -> z, 电压第一通道 -> current, y填0
+    data_2d: (5, samples) 顺序为 [x, y, z, voltage, current]
     """
     time_list = time_array.tolist()
     n = len(time_list)
     d = {
         "time": time_list,
         "x": data_2d[0].tolist() if data_2d.shape[0] > 0 else [0.0]*n,
-        "y": [0.0] * n,
-        "z": data_2d[1].tolist() if data_2d.shape[0] > 1 else [0.0]*n,
-        "current": data_2d[2].tolist() if data_2d.shape[0] > 2 else [0.0]*n
+        "y": data_2d[1].tolist() if data_2d.shape[0] > 1 else [0.0]*n,
+        "z": data_2d[2].tolist() if data_2d.shape[0] > 2 else [0.0]*n,
+        "current": data_2d[4].tolist() if data_2d.shape[0] > 4 else [0.0]*n  # 第5通道为电流
     }
     if side == "left":
         left_data.append(d)

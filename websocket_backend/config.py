@@ -7,51 +7,67 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 # ---------- PLC ----------
 PLC_IP = "192.168.3.124"
 PLC_PORT = 1025
-PLC_MODE_REG = "R10"
-PLC_PRODUCT_REG = "R11"
+
+# 公共寄存器
+PLC_MODE_REG = "R10"           # 1自动, 2人工
+PLC_PRODUCT_REG = "R11"        # 规格名（10个字）
 
 # ---------- 心跳 ----------
 HEARTBEAT_REG = "R999"        # 心跳寄存器（公共）
 HEARTBEAT_INTERVAL = 1.0      # 心跳间隔（秒）
 
-# 工位配置（增加NI通道和模型输入索引）
+# 工位配置
 STATIONS = {
     "left": {
         "barcode_start": "R100",
         "barcode_len": 40,
-        "plc_step_reg": "R140",
-        "manual_result_reg": "R141",
-        "pc_step_reg": "R150",
-        "auto_result_reg": "R151",
-        # 仅采集该工位使用的NI通道
-        "accel_channels": "cDAQ1Mod1/ai0:1",   # 9234 通道0,1 (x,z)
-        "voltage_channels": "cDAQ1Mod2/ai0:1", # 9239 通道0,1 (电流,电压)
-        # 模型输入使用哪些通道（从上述采集的通道中选，索引对应采集到的数据顺序）
-        # 采集数据顺序：[accel通道..., voltage通道...] -> 这里accel 2个 + voltage 2个 = 4个
-        # 模型只取x,z加速度，即索引0,1
-        "input_indices": [0, 1],
+        "plc_cmd_reg": "R140",        # PLC写入命令，PC读取
+        "pc_status_reg": "R150",      # PC写入状态，PLC读取
+        "plc_data_reg": "R160",       # PLC写入其他数据
+        "pc_result_reg": "R151",      # PC写入结果，PLC读取
+        "pc_result_ready": "R152",    # PC结果就绪标志
+        "manual_result_reg": "R141",  # PLC写入人工判定，PC读取
+        "reset_reg": "R30.1",         # 重置信号寄存器 (bit)
+        "accel_channels": "cDAQ1Mod1/ai0:2",
+        "voltage_channel": "cDAQ1Mod3/ai0",
+        "current_channel": "cDAQ1Mod3/ai2",
+        "input_indices": [0, 1, 2],
     },
     "right": {
         "barcode_start": "R200",
         "barcode_len": 40,
-        "plc_step_reg": "R240",
+        "plc_cmd_reg": "R240",
+        "pc_status_reg": "R250",
+        "plc_data_reg": "R260",
+        "pc_result_reg": "R251",
+        "pc_result_ready": "R252",
         "manual_result_reg": "R241",
-        "pc_step_reg": "R250",
-        "auto_result_reg": "R251",
-        "accel_channels": "cDAQ1Mod1/ai2:3",   # 9234 通道2,3 (x,z)
-        "voltage_channels": "cDAQ1Mod2/ai2:3", # 9239 通道2,3 (电流,电压)
-        "input_indices": [0, 1],               # 同样取加速度
+        "reset_reg": "R30.2",         # 重置信号寄存器 (bit)
+        "accel_channels": "cDAQ1Mod2/ai0:2",
+        "voltage_channel": "cDAQ1Mod3/ai1",
+        "current_channel": "cDAQ1Mod3/ai3",
+        "input_indices": [0, 1, 2],
     }
 }
 
+# PLC命令定义 (PLC写入, PC读取)
+PLC_CMD_IDLE = 0
+PLC_CMD_READY = 100
+PLC_CMD_START = 200
+PLC_CMD_FIRST_END = 300
+PLC_CMD_SECOND_START = 400
+PLC_CMD_STOP = 900
+
+# PC状态定义 (PC写入, PLC读取)
+PC_STATUS_IDLE = 0
+PC_STATUS_READY = 100
+PC_STATUS_COLLECTING = 200
+PC_STATUS_PROCESSING = 300
+PC_STATUS_COMPLETE = 900
+PC_STATUS_ERROR = 999
+
 MODEL_IN_CH = len(STATIONS["left"]["input_indices"])
 MODEL_NUM_CLASSES = 2
-
-STEP_READY = 100
-STEP_TEST_START = 200
-STEP_TEST_FIRST_END = 300
-STEP_TEST_SECOND_START = 400
-STEP_TEST_END = 900
 
 # ---------- NI 采集 ----------
 SAMPLE_RATE = 4800
@@ -59,14 +75,14 @@ CHUNK_SAMPLES = 1000
 MAX_COLLECT_TIME = 60.0
 RANGE_9234 = (-50.0, 50.0)
 SENSITIVITY = 100
-RANGE_9239 = (-10.0, 10.0)
+SENSOR_OUTPUT_MAX = 10.0
+VOLTAGE_SENSOR_MAX = 36.0
+CURRENT_SENSOR_MAX = 30.0
 
 # ---------- 模型 ----------
 MODEL_DIR = os.path.join(SAVE_DIR, "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
-# 默认模型（当规格无专属模型时使用，可提前放置或留空）
 DEFAULT_MODEL_PATH = os.path.join(MODEL_DIR, "default.pth")
-
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ---------- 数据保存 ----------
@@ -87,5 +103,5 @@ TRAIN_CONFIG = {
     "num_workers": 4,
     "pin_memory": True,
     "max_len": None,
-    "min_samples_per_spec": 5,      # 少于该样本数则不训练
+    "min_samples_per_spec": 5,
 }

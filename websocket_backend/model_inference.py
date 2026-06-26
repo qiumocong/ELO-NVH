@@ -24,9 +24,9 @@ def get_model_for_spec(spec_name):
     _model_cache[spec_name] = model
     return model
 
-def preprocess(data_8ch, station_name):
-    indices = STATIONS[station_name]["input_indices"]
-    selected = data_8ch[indices, :]
+def preprocess(data, station_name):
+    indices = STATIONS[station_name]["input_indices"]  # [0, 1, 2]
+    selected = data[indices, :]  # 取 [x, y, z]
     return torch.tensor(selected, dtype=torch.float32).unsqueeze(0)
 
 def predict(model, tensor):
