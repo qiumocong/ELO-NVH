@@ -3,20 +3,14 @@
 
 布局结构：
 ┌─────────────────────────────────────────────────────────────────┐
-│  StatusBarWidget                                                  │
 ├──────────┬─────────────────────┬─────────────────────────────────┤
 │ 左工位    │ 左X时域 │ 左X频谱   │ 右X时域 │ 右X频谱               │
-│  条码     ├─────────────────────┼─────────────────────────────────┤
-│  规格     │ 左Y时域 │ 左Y频谱   │ 右Y时域 │ 右Y频谱               │
-│  模式     ├─────────────────────┼─────────────────────────────────┤
-│          │ 左Z时域 │ 左Z频谱   │ 右Z时域 │ 右Z频谱               │
-│ ──────── ├─────────────────────┼─────────────────────────────────┤
-│ 右工位    │ 左电流              │ 右电流                           │
-│  条码     │                     │                                   │
-│  规格     │                     │                                   │
-│  模式     │                     │                                   │
-│ ──────── │                     │                                   │
-│ 左结果    │                     │                                   │
+│ 右工位    ├─────────────────────┼─────────────────────────────────┤
+│ ────────  │ 左Y时域 │ 左Y频谱   │ 右Y时域 │ 右Y频谱               │
+│ 连接状态   ├─────────────────────┼─────────────────────────────────┤
+│ 检测状态   │ 左Z时域 │ 左Z频谱   │ 右Z时域 │ 右Z频谱               │
+│ ────────  ├─────────────────────┼─────────────────────────────────┤
+│ 左结果    │ 左电流              │ 右电流                           │
 │ 右结果    │                     │                                   │
 └──────────┴─────────────────────┴─────────────────────────────────┘
 """
@@ -61,15 +55,6 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 状态栏
-        self._status_bar = StatusBarWidget()
-        main_layout.addWidget(self._status_bar)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("color: #ddd;")
-        main_layout.addWidget(sep)
-
         # 主内容区
         content = QWidget()
         content_layout = QHBoxLayout(content)
@@ -78,7 +63,7 @@ class MainWindow(QMainWindow):
 
         # ========== 左侧面板 ==========
         left_panel = QWidget()
-        left_panel.setFixedWidth(400)
+        left_panel.setFixedWidth(320)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(12, 20, 12, 12)
@@ -103,19 +88,19 @@ class MainWindow(QMainWindow):
             fl.setSpacing(2)
 
             title = QLabel(SIDE_TITLES[side])
-            title.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+            title.setStyleSheet("font-size: 13px; font-weight: bold; color: #333;")
             fl.addWidget(title)
 
             barcode = QLabel("条码: ——")
-            barcode.setStyleSheet("font-size: 13px; color: #555;")
+            barcode.setStyleSheet("font-size: 12px; color: #555;")
             fl.addWidget(barcode)
 
             spec = QLabel("规格: ——")
-            spec.setStyleSheet("font-size: 13px; color: #555;")
+            spec.setStyleSheet("font-size: 12px; color: #555;")
             fl.addWidget(spec)
 
             mode = QLabel("模式: ——")
-            mode.setStyleSheet("font-size: 13px; color: #555;")
+            mode.setStyleSheet("font-size: 12px; color: #555;")
             fl.addWidget(mode)
 
             self._info_labels[side] = {"barcode": barcode, "spec": spec, "mode": mode}
@@ -127,6 +112,16 @@ class MainWindow(QMainWindow):
         sep2.setFrameShape(QFrame.HLine)
         sep2.setStyleSheet("color: #ccc;")
         left_layout.addWidget(sep2)
+
+        # 连接状态 + 检测状态
+        self._status_bar = StatusBarWidget()
+        left_layout.addWidget(self._status_bar)
+
+        # 分隔
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.HLine)
+        sep3.setStyleSheet("color: #ccc;")
+        left_layout.addWidget(sep3)
 
         # 左检测结果
         self._result_panel_left = ResultPanel("左侧检测结果")

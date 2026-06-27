@@ -17,7 +17,7 @@ class StatusBarWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(36)  # 固定高度
+        self.setFixedHeight(48)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -27,30 +27,30 @@ class StatusBarWidget(QWidget):
         # --- 左侧：连接状态 ---
         # 圆点：用特殊字符 "●" 模拟指示灯，通过改变颜色表示状态
         self._conn_dot = QLabel("●")
-        self._conn_dot.setStyleSheet("font-size: 16px; color: #ccc;")  # 默认灰色
+        self._conn_dot.setStyleSheet("font-size: 20px; color: #ccc;")  # 默认灰色
         layout.addWidget(self._conn_dot)
 
         self._conn_label = QLabel("未连接")
-        self._conn_label.setStyleSheet("font-size: 13px; color: #888;")
+        self._conn_label.setStyleSheet("font-size: 18px; color: #888;")
         layout.addWidget(self._conn_label)
 
         layout.addStretch()  # 弹性空间
 
         # --- 右侧：检测状态 ---
         self._detect_label = QLabel("检测状态: 待检测")
-        self._detect_label.setStyleSheet("font-size: 13px; color: #555;")
+        self._detect_label.setStyleSheet("font-size: 18px; color: #555;")
         layout.addWidget(self._detect_label)
 
     def set_connected(self, connected: bool):
         """更新连接状态（只管连接指示灯，不改检测状态）"""
         if connected:
-            self._conn_dot.setStyleSheet("font-size: 16px; color: #4CAF50;")  # 绿色
+            self._conn_dot.setStyleSheet("font-size: 20px; color: #4CAF50;")  # 绿色
             self._conn_label.setText("已连接")
-            self._conn_label.setStyleSheet("font-size: 13px; color: #4CAF50;")
+            self._conn_label.setStyleSheet("font-size: 18px; color: #4CAF50;")
         else:
-            self._conn_dot.setStyleSheet("font-size: 16px; color: #ccc;")  # 灰色
+            self._conn_dot.setStyleSheet("font-size: 20px; color: #ccc;")  # 灰色
             self._conn_label.setText("未连接")
-            self._conn_label.setStyleSheet("font-size: 13px; color: #888;")
+            self._conn_label.setStyleSheet("font-size: 18px; color: #888;")
             self._detect_label.setText("检测状态: 待检测")
 
     def set_detect_status(self, status: str):

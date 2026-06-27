@@ -2,8 +2,10 @@
 数据集标注工具 — 程序入口
 
 启动方式：
-    python labeler.py          # 用模拟数据
-    python labeler.py --ws     # 用真实 WebSocket
+    python labeler.py                   # 用模拟数据
+    python labeler.py --ws              # WebSocket
+    python labeler.py --csv             # 读 data/ch0.csv
+    python labeler.py --csv path.csv   # 读指定 CSV
 """
 
 import sys
@@ -21,16 +23,20 @@ def main():
 
     window = LabelerWindow()
 
-    from mock_data import MockDataSource
-    source = MockDataSource(interval_ms=50, batch_size=10, auto_start=True)
-
-    if "--ws" in sys.argv:
+    csv_idx = next((i for i, a in enumerate(sys.argv) if a == "--csv"), -1)
+    if csv_idx >= 0:
+        csv_path = sys.argv[csv_idx + 1] if csv_idx + 1 < len(sys.argv) and not sys.argv[csv_idx + 1].startswith("--") else "data/ch0.csv"
+        from csv_data_source import CsvDataSource
+        source = CsvDataSource(csv_path=csv_path, interval_ms=50, batch_size=100, auto_start=True)
+    elif "--ws" in sys.argv:
         from websocket_client import WebSocketClient
         source = WebSocketClient(url=WS_URL, reconnect_interval=RECONNECT_INTERVAL)
+    else:
+        from mock_data import MockDataSource
+        source = MockDataSource(interval_ms=50, batch_size=10, auto_start=True)
 
     window.connect_data_source(source)
     source.start()
-
     window.show()
     sys.exit(app.exec_())
 
