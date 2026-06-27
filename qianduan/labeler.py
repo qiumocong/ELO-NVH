@@ -26,8 +26,10 @@ def main():
     csv_idx = next((i for i, a in enumerate(sys.argv) if a == "--csv"), -1)
     if csv_idx >= 0:
         csv_path = sys.argv[csv_idx + 1] if csv_idx + 1 < len(sys.argv) and not sys.argv[csv_idx + 1].startswith("--") else "data/ch0.csv"
+        cur_csv_idx = next((i for i, a in enumerate(sys.argv) if a == "--current-csv"), -1)
+        cur_csv = sys.argv[cur_csv_idx + 1] if cur_csv_idx >= 0 and cur_csv_idx + 1 < len(sys.argv) and not sys.argv[cur_csv_idx + 1].startswith("--") else None
         from csv_data_source import CsvDataSource
-        source = CsvDataSource(csv_path=csv_path, interval_ms=50, batch_size=100, auto_start=True)
+        source = CsvDataSource(csv_path=csv_path, current_csv_path=cur_csv, interval_ms=50, batch_size=100, auto_start=True)
     elif "--ws" in sys.argv:
         from websocket_client import WebSocketClient
         source = WebSocketClient(url=WS_URL, reconnect_interval=RECONNECT_INTERVAL)

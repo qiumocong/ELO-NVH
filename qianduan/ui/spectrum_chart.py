@@ -58,16 +58,15 @@ class SpectrumChart(QWidget):
         self._plot_widget.setLabel("left", "频率", units="Hz")
         self._plot_widget.setMinimumHeight(120)
 
-        # 坐标轴刻度字体缩小
+        # 坐标轴刻度字体缩小，禁用自动 SI 前缀
         axis_font = pg.QtGui.QFont()
         axis_font.setPointSize(8)
-        self._plot_widget.getAxis('left').setStyle(tickFont=axis_font)
-        self._plot_widget.getAxis('bottom').setStyle(tickFont=axis_font)
-        # 坐标轴标题字体缩小
-        label_font = pg.QtGui.QFont()
-        label_font.setPointSize(8)
-        self._plot_widget.getAxis('left').label.setFont(label_font)
-        self._plot_widget.getAxis('bottom').label.setFont(label_font)
+        for ax_name in ('left', 'bottom'):
+            axis = self._plot_widget.getAxis(ax_name)
+            axis.setStyle(tickFont=axis_font)
+            axis.enableAutoSIPrefix(False)
+            lf = pg.QtGui.QFont(); lf.setPointSize(8)
+            axis.label.setFont(lf)
 
         # 热力图图层
         self._image_item = pg.ImageItem()
