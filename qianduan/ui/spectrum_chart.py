@@ -82,17 +82,28 @@ class SpectrumChart(QWidget):
 
         layout.addWidget(self._plot_widget)
 
-    def update_from_time_data(self, time_values: list):
+    def update_from_time_data(self, time_values: list, timestamps: list = None):
         """
         接收时域数据，做 STFT，画时频热力图。
+
+        参数:
+            time_values: 最新的时域数据列表
+            timestamps: 对应的时间戳列表（可选，用于自动推算采样率）
         """
         if len(time_values) < 64:
             return
 
+        # 根据实际时间戳推算采样率，否则用配置默认值
+        sr = SAMPLE_RATE
+        if timestamps and len(timestamps) > 1:
+            dt = (timestamps[-1] - timestamps[0]) / (len(timestamps) - 1)
+            if dt > 0:
+                sr = 1.0 / dt
+
         try:
             times, freqs, magnitudes = compute_stft(
                 time_values,
-                sample_rate=SAMPLE_RATE,
+                sample_rate=int(sr),
                 window_size=256,
                 hop_size=64,
             )

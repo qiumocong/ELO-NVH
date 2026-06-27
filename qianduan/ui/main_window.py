@@ -197,7 +197,7 @@ class MainWindow(QMainWindow):
             for ch in VIBRATION_CHANNELS:
                 chart = self._charts[side][ch]
                 if len(chart._values) >= 16:
-                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values))
+                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values), list(chart._times))
 
     def _on_result(self, msg: dict):
         result_text = msg.get("result", "")
