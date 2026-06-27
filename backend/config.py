@@ -44,35 +44,48 @@ STATIONS = {
     }
 }
 
-# 模型输入通道数（左右必须一致，此处为2）
 MODEL_IN_CH = len(STATIONS["left"]["input_indices"])
+MODEL_NUM_CLASSES = 2
 
-# 步骤定义
 STEP_READY = 100
 STEP_TEST_START = 200
 STEP_TEST_FIRST_END = 300
 STEP_TEST_SECOND_START = 400
 STEP_TEST_END = 900
 
-# ---------- NI 采集公共参数 ----------
+# ---------- NI 采集 ----------
 SAMPLE_RATE = 4800
 CHUNK_SAMPLES = 1000
 MAX_COLLECT_TIME = 60.0
-
-# 9234 加速度计参数（共用）
 RANGE_9234 = (-50.0, 50.0)
 SENSITIVITY = 100
-# 9239 电压参数（共用）
 RANGE_9239 = (-10.0, 10.0)
 
 # ---------- 模型 ----------
-MODEL_PATH = os.path.join(SAVE_DIR, "best_model.pth")
-MODEL_NUM_CLASSES = 2
+MODEL_DIR = os.path.join(SAVE_DIR, "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+# 默认模型（当规格无专属模型时使用，可提前放置或留空）
+DEFAULT_MODEL_PATH = os.path.join(MODEL_DIR, "default.pth")
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ---------- 数据保存 ----------
 DATA_SAVE_DIR = os.path.join(SAVE_DIR, "saved_data")
 OK_DIRNAME = "OK"
 NG_DIRNAME = "NG"
-for d in [OK_DIRNAME, NG_DIRNAME]:
-    os.makedirs(os.path.join(DATA_SAVE_DIR, d), exist_ok=True)
+os.makedirs(DATA_SAVE_DIR, exist_ok=True)
+
+# ---------- 训练参数 ----------
+TRAIN_CONFIG = {
+    "batch_size": 8,
+    "epochs": 20,
+    "lr": 1e-3,
+    "weight_decay": 1e-4,
+    "test_size": 0.15,
+    "val_size": 0.15,
+    "seed": 42,
+    "num_workers": 4,
+    "pin_memory": True,
+    "max_len": None,
+    "min_samples_per_spec": 5,      # 少于该样本数则不训练
+}

@@ -6,12 +6,12 @@ import threading
 from config import *
 from plc_comm import PLCClient
 from data_acquisition import DataAcquisition
-from model_inference import load_model, preprocess, predict
+from model_inference import get_model_for_spec, preprocess, predict  # 改用动态加载
 
 class StationWorker:
-    def __init__(self, name, model=None):
+    def __init__(self, name):
         self.name = name
-        self.model = model
+        self.model = None                     # 将在读取规格后加载
         self.station_cfg = STATIONS[name]
         self.plc = PLCClient(PLC_IP, PLC_PORT)
         self.plc.connect()
@@ -46,19 +46,15 @@ class StationWorker:
         每个通道保存为单独CSV，包含 time 和 ch_i 两列
         """
         label_str = "OK" if label == 0 else "NG"
-        # 安全处理文件夹名：替换非法字符
         safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
         safe_spec = "".join(c for c in self.current_spec if c.isalnum() or c in ('_', '-'))
-        # 若缺少信息，使用默认值
         if not safe_barcode:
             safe_barcode = f"NOBARCODE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         if not safe_spec:
             safe_spec = "UNKNOWN_SPEC"
-        # 构建路径
         save_dir = os.path.join(DATA_SAVE_DIR, safe_barcode, label_str, safe_spec)
         os.makedirs(save_dir, exist_ok=True)
 
-        # 保存每个通道（包含时间列）
         for i in range(data.shape[0]):
             ch_path = os.path.join(save_dir, f"ch{i}.csv")
             df = pd.DataFrame({
@@ -67,17 +63,16 @@ class StationWorker:
             })
             df.to_csv(ch_path, index=False)
 
-        # 可选：保存一个元数据文件（如工位、时间等），但非必需
         print(f"[{self.name}] 数据已保存至 {save_dir}")
 
     def run(self):
         print(f"[{self.name}] 线程启动")
         while self.running:
             try:
-                # ---------- 心跳：每秒读取一次模式寄存器，保持通信活跃 ----------
+                # ---------- 心跳 ----------
                 now = time.time()
                 if now - self.last_heartbeat >= 1.0:
-                    _ = self.plc.read_mode()  # 读取操作即发送通信包
+                    _ = self.plc.read_mode()
                     self.last_heartbeat = now
 
                 # ---------- 状态机 ----------
@@ -89,6 +84,16 @@ class StationWorker:
                     )
                     self.current_spec = self.plc.read_product_spec()
                     print(f"[{self.name}] 条码:{self.current_barcode} 规格:{self.current_spec}")
+
+                    # ---- 根据规格动态加载模型 ----
+                    mode_now = self.plc.read_mode()
+                    if mode_now == 1:   # 自动模式
+                        self.model = get_model_for_spec(self.current_spec)
+                        print(f"[{self.name}] 已加载规格 {self.current_spec} 的模型")
+                    else:
+                        self.model = None
+                        print(f"[{self.name}] 人工模式，不加载模型")
+
                     self.plc.write_pc_step(self.name, STEP_READY)
 
                 elif plc_step == STEP_TEST_START and self.state == "idle":
@@ -116,7 +121,6 @@ class StationWorker:
                         self.state = "idle"
                         continue
 
-                    # 确保条码/规格已读取（若之前未读取则补读）
                     if not self.current_barcode:
                         self.current_barcode = self.plc.read_barcode(
                             self.station_cfg["barcode_start"], self.station_cfg["barcode_len"]
@@ -129,14 +133,15 @@ class StationWorker:
                     if mode_now == 1:   # 自动
                         if self.model is None:
                             print(f"[{self.name}] 错误：自动模式但模型未加载")
-                            label = 1  # 默认NG
+                            label = 1   # 默认NG
+                            score = 0.0
                         else:
                             tensor = preprocess(data, self.name)
-                            pred = predict(self.model, tensor)
-                            label = pred  # 0=OK, 1=NG
+                            pred, score = predict(self.model, tensor)  # 返回 (label, score)
+                            label = pred
                         result_code = 1 if label == 0 else 2
                         self.plc.write_auto_result(self.name, result_code)
-                        print(f"[{self.name}] 自动判定: {'OK' if label == 0 else 'NG'}")
+                        print(f"[{self.name}] 自动判定: {'OK' if label == 0 else 'NG'} (置信度 {score:.3f})")
                     else:               # 人工
                         print(f"[{self.name}] 等待人工判定...")
                         timeout = 30
@@ -154,7 +159,6 @@ class StationWorker:
                         print(f"[{self.name}] 人工判定: {'OK' if label == 0 else 'NG'}")
                         self.plc.write_pc_step(self.name, STEP_TEST_END)
 
-                    # 保存数据
                     self.save_per_channel(t, data, label)
                     self.state = "idle"
                     print(f"[{self.name}] 处理完成")

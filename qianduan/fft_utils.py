@@ -12,9 +12,7 @@ STFT 短时傅里叶变换工具模块
 - 纵轴 = 频率（每一行对应一个频率 bin）
 - 值 = 该时刻该频率的能量（幅值）
 """
-
 from __future__ import annotations
-
 import numpy as np
 
 
