@@ -47,7 +47,7 @@ def main():
     finally:
         left_worker.stop()
         right_worker.stop()
-        heartbeat.stop()
+        # heartbeat.stop()
         shared_daq.stop()  # 停止共享采集
         plc_manager.close()
         print("[主程序] 已退出")

@@ -1,11 +1,9 @@
 import time
 import threading
 from plc_comm import PLCClient
-from config import PLC_IP, PLC_PORT, PLC_MODE_REG
-
+from config import PLC_IP, PLC_PORT, PLC_MODE_REG, PLC_TIMEOUT, PLC_RETRIES, PLC_KEEPALIVE_INTERVAL
 
 class PLCManager:
-    """PLC连接管理器 - 单例模式，所有组件共享一个连接"""
     _instance = None
     _lock = threading.Lock()
 
@@ -28,12 +26,10 @@ class PLCManager:
         self._reconnect_lock = threading.Lock()
         self._is_reconnecting = False
         self._connect()
-        # 启动后台心跳保持连接
         self._heartbeat_thread = threading.Thread(target=self._keepalive, daemon=True)
         self._heartbeat_thread.start()
 
     def _connect(self):
-        """建立连接"""
         with self._lock:
             if self.connected:
                 return True
@@ -54,23 +50,19 @@ class PLCManager:
                 return False
 
     def _keepalive(self):
-        """后台心跳线程，保持连接活跃"""
         while self.running:
             try:
                 if self.connected and self.plc:
-                    # 每2秒读取一次模式寄存器，保持连接
                     _ = self.plc.read_word(PLC_MODE_REG)
-                time.sleep(2)
+                time.sleep(PLC_KEEPALIVE_INTERVAL)
             except Exception as e:
                 if self.running:
                     print(f"[PLC管理器] 心跳异常: {e}")
                     self.connected = False
-                    # 尝试重连
                     time.sleep(1)
                     self._connect()
 
     def ensure_connection(self, retry=True):
-        """确保连接有效，如果断开则重连"""
         with self._lock:
             if self.connected and self.plc:
                 try:
@@ -104,8 +96,7 @@ class PLCManager:
             return self.connected
 
     def _execute_with_retry(self, func, *args, **kwargs):
-        """执行PLC操作，失败时自动重试，并增加超时控制"""
-        max_retries = 3
+        max_retries = PLC_RETRIES
         last_error = None
 
         for attempt in range(max_retries):
@@ -113,16 +104,14 @@ class PLCManager:
                 if not self.ensure_connection(retry=(attempt > 0)):
                     raise Exception("PLC连接不可用")
 
-                # 设置超时，避免无限等待
                 if self.plc and self.plc.client:
                     try:
-                        self.plc.client.sock.settimeout(3.0)
+                        self.plc.client.sock.settimeout(PLC_TIMEOUT)
                     except:
                         pass
 
                 result = func(*args, **kwargs)
 
-                # 恢复超时设置
                 try:
                     self.plc.client.sock.settimeout(None)
                 except:
@@ -134,7 +123,6 @@ class PLCManager:
                 last_error = e
                 error_msg = str(e)
 
-                # 恢复超时设置
                 try:
                     self.plc.client.sock.settimeout(None)
                 except:
@@ -150,15 +138,12 @@ class PLCManager:
                     else:
                         raise
                 else:
-                    # 非连接错误，直接抛出
                     raise
 
         if last_error:
             raise last_error
 
-    # ============================================================
-    # 所有PLC操作方法
-    # ============================================================
+    # ---- 所有对外接口 ----
     def read_word(self, register):
         return self._execute_with_retry(self.plc.read_word, register)
 
@@ -222,6 +207,4 @@ class PLCManager:
                 self.plc = None
                 print("[PLC管理器] 连接已关闭")
 
-
-# 全局单例
 plc_manager = PLCManager()
