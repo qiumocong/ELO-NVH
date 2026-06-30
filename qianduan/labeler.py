@@ -8,7 +8,12 @@
     python labeler.py --csv path.csv   # 读指定 CSV
 """
 
+
 import sys
+import os
+# 确保优先导入 qianduan/ 下的 config，而不是项目根目录的
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from PyQt5.QtWidgets import QApplication
 from ui.labeler_window import LabelerWindow
 from config import WS_URL, RECONNECT_INTERVAL

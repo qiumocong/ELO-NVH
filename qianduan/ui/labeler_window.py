@@ -28,6 +28,9 @@ class LabelerWindow(QMainWindow):
 
         self._charts = {side: {} for side in SIDES}
         self._spectrum_charts = {side: {} for side in SIDES}
+        self._spectrum_tick = 0
+        self._side_has_data = {"left": False, "right": False}
+        self._side_time_offset = {"left": 0.0, "right": 0.0}
 
         self._setup_ui()
 
@@ -97,12 +100,6 @@ class LabelerWindow(QMainWindow):
         self._status_bar = StatusBarWidget()
         left_layout.addWidget(self._status_bar)
 
-        # 分隔
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.HLine)
-        sep3.setStyleSheet("color: #ccc;")
-        left_layout.addWidget(sep3)
-
         # 左侧标注面板
         self._labeler_left = LabelerPanel("left")
         left_layout.addWidget(self._labeler_left, stretch=1)
@@ -152,6 +149,19 @@ class LabelerWindow(QMainWindow):
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content, stretch=1)
 
+    def _clear_side(self, side: str):
+        for ch in ALL_CHANNELS:
+            self._charts[side][ch].clear()
+        for ch in VIBRATION_CHANNELS:
+            self._spectrum_charts[side][ch].clear()
+        if side == "left":
+            self._labeler_left.clear()
+        else:
+            self._labeler_right.clear()
+        self._side_has_data[side] = False
+        self._side_time_offset[side] = 0.0
+        self._spectrum_tick = 0
+
     def connect_data_source(self, source):
         source.data_received.connect(self._on_data)
         source.result_received.connect(self._on_result)
@@ -172,16 +182,26 @@ class LabelerWindow(QMainWindow):
                         self._charts[side][ch].add_data([t], [val])
         else:
             for side in SIDES:
+                has = False
                 for ch in ALL_CHANNELS:
                     values = msg.get(f"{side}_{ch}", [])
                     if values:
-                        self._charts[side][ch].add_data(times, values)
+                        if not self._side_has_data[side]:
+                            self._side_time_offset[side] = times[0]
+                        local_times = [t - self._side_time_offset[side] for t in times]
+                        self._charts[side][ch].add_data(local_times, values)
+                        has = True
+                if has:
+                    self._side_has_data[side] = True
 
-        for side in SIDES:
-            for ch in VIBRATION_CHANNELS:
-                chart = self._charts[side][ch]
-                if len(chart._values) >= 16:
-                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values), list(chart._times))
+        self._spectrum_tick += 1
+        if self._spectrum_tick % 4 == 0:
+            for side in SIDES:
+                for ch in VIBRATION_CHANNELS:
+                    chart = self._charts[side][ch]
+                    if len(chart._values) >= 64:
+                        self._spectrum_charts[side][ch].update_from_time_data(
+                            chart._values, chart._times)
 
     def _on_info(self, msg: dict):
         side = msg.get("side", "left")
@@ -192,6 +212,10 @@ class LabelerWindow(QMainWindow):
         spec = msg.get("spec", "——")
         mode = msg.get("mode", "——")
         mode_display = {"auto": "自动", "manual": "人工"}.get(mode, mode)
+
+        if self._side_has_data.get(side):
+            self._clear_side(side)
+
         labels["barcode"].setText(f"条码: {barcode}")
         labels["spec"].setText(f"规格: {spec}")
         labels["mode"].setText(f"模式: {mode_display}")

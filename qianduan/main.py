@@ -9,6 +9,9 @@ XXX 检测系统 — 程序入口
 """
 
 import sys
+import os
+# 确保优先导入 qianduan/ 下的 config，而不是项目根目录的
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PyQt5.QtWidgets import QApplication
 from ui.main_window import MainWindow
 from config import WS_URL, RECONNECT_INTERVAL

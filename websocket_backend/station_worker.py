@@ -1,5 +1,6 @@
 import time
 import os
+import numpy as np
 import pandas as pd
 from datetime import datetime
 import threading
@@ -24,7 +25,13 @@ class StationWorker:
         self.current_spec = ""
         self.current_mode = 0
         self.state = PC_STATUS_IDLE
-        self.is_collecting = False  # 标记是否正在采集
+        self.is_collecting = False
+
+        # 记录各段样本索引
+        self.start_sample = 0
+        self.first_end_sample = 0
+        self.second_start_sample = 0
+        self.stop_sample = 0
 
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -128,18 +135,9 @@ class StationWorker:
     def reset_flow(self):
         print(f"[{self.name}] 重置流程...")
         self.is_collecting = False
-        try:
-            shared_daq.stop()
-        except:
-            pass
         self.state = PC_STATUS_IDLE
 
     def _do_inference(self, data):
-        """
-        执行推理判定
-        返回: (label, score)
-        label: 0=OK, 1=NG
-        """
         label = 0
         score = 0.0
 
@@ -163,7 +161,6 @@ class StationWorker:
             result_val = None
 
             while time.time() - start_wait < timeout:
-                # 人工判定期间检测重置信号
                 try:
                     if self.plc.read_reset_signal(self.name):
                         print(f"[{self.name}] 人工判定期间重置")
@@ -172,13 +169,11 @@ class StationWorker:
                 except:
                     pass
 
-                # 检查WebSocket标注
                 label_val = websocket_server.get_pending_label(self.name)
                 if label_val is not None:
                     result_val = 1 if label_val == 1 else 2
                     break
 
-                # 检查PLC人工结果
                 try:
                     val = self.plc.read_manual_result(self.name)
                     if val in (1, 2):
@@ -190,7 +185,7 @@ class StationWorker:
                 time.sleep(0.5)
 
             if result_val is None:
-                result_val = 2  # 默认NG
+                result_val = 2
 
             label = 0 if result_val == 1 else 1
             result_str = "OK" if label == 0 else "NG"
@@ -206,9 +201,7 @@ class StationWorker:
 
         while self.running:
             try:
-                # ============================================================
                 # 阶段1: 等待数据就绪 或 READY命令
-                # ============================================================
                 print(f"[{self.name}] 等待数据就绪信号或READY命令...")
                 reason, value = self.wait_for_condition(
                     target_cmd=PLC_CMD_READY,
@@ -226,15 +219,12 @@ class StationWorker:
                     print(f"[{self.name}] 等待超时")
                     continue
 
-                # 读取数据并回复就绪
                 self.read_plc_data()
                 self.plc.write_pc_status(self.name, PC_STATUS_READY)
                 self.state = PC_STATUS_READY
                 print(f"[{self.name}] PC就绪 (状态={PC_STATUS_READY})")
 
-                # ============================================================
                 # 阶段2: 等待START命令
-                # ============================================================
                 print(f"[{self.name}] 等待START命令...")
                 reason, value = self.wait_for_condition(
                     target_cmd=PLC_CMD_START,
@@ -257,21 +247,21 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到START命令，开始采集...")
-
-                # 标记采集状态
                 self.is_collecting = True
 
+                # 启动共享采集（如果未运行）
                 if not shared_daq.is_running:
-                    shared_daq.start()
+                    shared_daq.start(reset_time=True)
                     time.sleep(0.5)
+
+                # 记录起始样本索引
+                self.start_sample = shared_daq.sample_count
 
                 self.plc.write_pc_status(self.name, PC_STATUS_COLLECTING)
                 self.state = PC_STATUS_COLLECTING
                 print(f"[{self.name}] 采集已启动")
 
-                # ============================================================
                 # 阶段3: 等待FIRST_END命令
-                # ============================================================
                 print(f"[{self.name}] 等待FIRST_END命令...")
                 reason, value = self.wait_for_condition(
                     target_cmd=PLC_CMD_FIRST_END,
@@ -295,14 +285,11 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到FIRST_END命令")
-                # # 停止采集（但保持数据）
-                # if shared_daq.is_running:
-                #     shared_daq.stop()
+                self.is_collecting = False  # 停止推送
+                self.first_end_sample = shared_daq.sample_count
                 self.plc.write_pc_status(self.name, PLC_CMD_FIRST_END)
 
-                # ============================================================
                 # 阶段4: 等待SECOND_START命令
-                # ============================================================
                 print(f"[{self.name}] 等待SECOND_START命令...")
                 reason, value = self.wait_for_condition(
                     target_cmd=PLC_CMD_SECOND_START,
@@ -326,14 +313,11 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到SECOND_START命令")
-                # # 重新启动采集，时间连续（reset_time=False）
-                # if not shared_daq.is_running:
-                #     shared_daq.start(reset_time=False)
+                self.is_collecting = True  # 恢复推送
+                self.second_start_sample = shared_daq.sample_count
                 self.plc.write_pc_status(self.name, PLC_CMD_SECOND_START)
 
-                # ============================================================
                 # 阶段5: 等待STOP命令
-                # ============================================================
                 print(f"[{self.name}] 等待STOP命令...")
                 reason, value = self.wait_for_condition(
                     target_cmd=PLC_CMD_STOP,
@@ -357,17 +341,25 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到STOP命令，停止采集...")
-
-                # 停止采集，不再推送数据
                 self.is_collecting = False
-                if shared_daq.is_running:
-                    shared_daq.stop()
+                self.stop_sample = shared_daq.sample_count
 
-                # ---- 获取采集数据 ----
-                if self.name == "left":
-                    t, data = shared_daq.get_left_data()
+                # 获取该工位的数据段（两段拼接）
+                # 第一段: start_sample ~ first_end_sample
+                t1, data1 = shared_daq.get_data_slice(self.name, self.start_sample, self.first_end_sample)
+                # 第二段: second_start_sample ~ stop_sample
+                t2, data2 = shared_daq.get_data_slice(self.name, self.second_start_sample, self.stop_sample)
+
+                # 拼接数据
+                if t1.size > 0 and t2.size > 0:
+                    t = np.concatenate([t1, t2])
+                    data = np.concatenate([data1, data2], axis=1)
+                elif t1.size > 0:
+                    t, data = t1, data1
+                elif t2.size > 0:
+                    t, data = t2, data2
                 else:
-                    t, data = shared_daq.get_right_data()
+                    t, data = np.array([]), np.empty((5, 0))
 
                 self.state = PC_STATUS_PROCESSING
 
@@ -378,23 +370,23 @@ class StationWorker:
                     self.state = PC_STATUS_IDLE
                     continue
 
-                # ---- 执行推理 ----
+                # 推理
                 label, score = self._do_inference(data)
 
-                # ---- 写入结果 ----
+                # 写入结果
                 result_code = 1 if label == 0 else 2
                 self.plc.write_result(self.name, result_code)
                 print(f"[{self.name}] 结果已写入: {result_code}")
 
-                # ---- 保存数据 ----
+                # 保存数据
                 self.save_per_channel(t, data, label)
 
-                # ---- 回复完成 ----
+                # 回复完成
                 self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.state = PC_STATUS_IDLE
                 print(f"[{self.name}] 处理完成\n")
-                # 清空WebSocket缓冲，避免旧数据残留
-                websocket_server.clear_buffers()
+                # 清空WebSocket缓冲（只清空本工位）
+                websocket_server.clear_buffer(self.name)
 
             except Exception as e:
                 if "重置" in str(e):

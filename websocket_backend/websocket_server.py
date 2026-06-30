@@ -164,3 +164,10 @@ def clear_buffers():
     left_data.clear()
     right_data.clear()
     print("[WebSocket] 缓冲已清空")
+
+def clear_buffer(side):
+    if side == "left":
+        left_data.clear()
+    else:
+        right_data.clear()
+    print(f"[WebSocket] 清空 {side} 缓冲")

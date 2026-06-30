@@ -78,7 +78,6 @@ class SharedDataAcquisition:
             self.right_data = np.empty((5, self.max_samples), dtype=np.float64)
             self.left_t = np.empty(self.max_samples, dtype=np.float64)
             self.right_t = np.empty(self.max_samples, dtype=np.float64)
-        # 否则不重置，继续追加
         self.is_running = True
         self._stop_requested = False
         self.thread = threading.Thread(target=self._acq_loop, daemon=True)
@@ -92,6 +91,26 @@ class SharedDataAcquisition:
         if self.thread:
             self.thread.join(timeout=2.0)
         print(f"[共享采集] 采集已停止, 共采集 {self.sample_count} 个样本 ({self.sample_count / self.sr:.2f}s)")
+
+    def get_data_slice(self, side, start_idx, end_idx):
+        """
+        获取指定样本范围的数据
+        start_idx, end_idx: 样本索引（整数）
+        返回 (t, data) 其中 t 为时间数组，data 形状 (5, n)
+        """
+        if start_idx < 0:
+            start_idx = 0
+        if end_idx > self.sample_count:
+            end_idx = self.sample_count
+        if start_idx >= end_idx:
+            return np.array([]), np.empty((5, 0))
+        if side == "left":
+            t = self.left_t[start_idx:end_idx]
+            data = self.left_data[:, start_idx:end_idx]
+        else:
+            t = self.right_t[start_idx:end_idx]
+            data = self.right_data[:, start_idx:end_idx]
+        return t, data
 
     def get_left_data(self):
         if self.left_data is None or self.sample_count == 0 or not self.left_has_data:
@@ -198,7 +217,6 @@ class SharedDataAcquisition:
                     actual = end - start
                     if actual <= 0:
                         break
-                    # 时间连续：使用当前sample_count作为起始时间索引
                     t_chunk = np.linspace(start / self.sr, end / self.sr, actual, endpoint=False)
                     data_block = buffer_all[:, :actual].T
 
