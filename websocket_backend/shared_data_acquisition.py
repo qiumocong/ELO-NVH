@@ -37,7 +37,6 @@ class SharedDataAcquisition:
         self.voltage_sensor_max = VOLTAGE_SENSOR_MAX
         self.current_sensor_max = CURRENT_SENSOR_MAX
 
-        # 从 STATIONS 读取各工位通道
         self.left_accel = STATIONS["left"]["accel_channels"]
         self.right_accel = STATIONS["right"]["accel_channels"]
         self.left_voltage = STATIONS["left"]["voltage_channel"]
@@ -68,21 +67,23 @@ class SharedDataAcquisition:
         self.callbacks[side] = callback
         print(f"[共享采集] 注册 {side} 回调")
 
-    def start(self):
+    def start(self, reset_time=True):
         if self.is_running:
             return
+        if reset_time:
+            self.sample_count = 0
+            self.left_has_data = False
+            self.right_has_data = False
+            self.left_data = np.empty((5, self.max_samples), dtype=np.float64)
+            self.right_data = np.empty((5, self.max_samples), dtype=np.float64)
+            self.left_t = np.empty(self.max_samples, dtype=np.float64)
+            self.right_t = np.empty(self.max_samples, dtype=np.float64)
+        # 否则不重置，继续追加
         self.is_running = True
         self._stop_requested = False
-        self.sample_count = 0
-        self.left_has_data = False
-        self.right_has_data = False
-        self.left_data = np.empty((5, self.max_samples), dtype=np.float64)
-        self.right_data = np.empty((5, self.max_samples), dtype=np.float64)
-        self.left_t = np.empty(self.max_samples, dtype=np.float64)
-        self.right_t = np.empty(self.max_samples, dtype=np.float64)
         self.thread = threading.Thread(target=self._acq_loop, daemon=True)
         self.thread.start()
-        print("[共享采集] 采集已启动")
+        print("[共享采集] 采集已启动" + (" (时间重置)" if reset_time else " (时间连续)"))
 
     def stop(self):
         print("[共享采集] 收到停止请求...")
@@ -197,6 +198,7 @@ class SharedDataAcquisition:
                     actual = end - start
                     if actual <= 0:
                         break
+                    # 时间连续：使用当前sample_count作为起始时间索引
                     t_chunk = np.linspace(start / self.sr, end / self.sr, actual, endpoint=False)
                     data_block = buffer_all[:, :actual].T
 

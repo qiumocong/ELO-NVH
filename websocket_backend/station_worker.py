@@ -295,6 +295,9 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到FIRST_END命令")
+                # # 停止采集（但保持数据）
+                # if shared_daq.is_running:
+                #     shared_daq.stop()
                 self.plc.write_pc_status(self.name, PLC_CMD_FIRST_END)
 
                 # ============================================================
@@ -323,6 +326,9 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到SECOND_START命令")
+                # # 重新启动采集，时间连续（reset_time=False）
+                # if not shared_daq.is_running:
+                #     shared_daq.start(reset_time=False)
                 self.plc.write_pc_status(self.name, PLC_CMD_SECOND_START)
 
                 # ============================================================
@@ -354,6 +360,8 @@ class StationWorker:
 
                 # 停止采集，不再推送数据
                 self.is_collecting = False
+                if shared_daq.is_running:
+                    shared_daq.stop()
 
                 # ---- 获取采集数据 ----
                 if self.name == "left":
@@ -385,6 +393,8 @@ class StationWorker:
                 self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.state = PC_STATUS_IDLE
                 print(f"[{self.name}] 处理完成\n")
+                # 清空WebSocket缓冲，避免旧数据残留
+                websocket_server.clear_buffers()
 
             except Exception as e:
                 if "重置" in str(e):

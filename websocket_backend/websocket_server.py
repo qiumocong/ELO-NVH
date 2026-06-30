@@ -159,3 +159,8 @@ def get_pending_label(side):
     val = pending_label.get(side)
     pending_label[side] = None
     return val
+
+def clear_buffers():
+    left_data.clear()
+    right_data.clear()
+    print("[WebSocket] 缓冲已清空")
