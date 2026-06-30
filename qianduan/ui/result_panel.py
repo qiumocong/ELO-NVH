@@ -46,12 +46,12 @@ class ResultPanel(QWidget):
 
         self._score_label = QLabel("")
         self._score_label.setAlignment(Qt.AlignCenter)
-        self._score_label.setStyleSheet("font-size: 13px; color: #666;")
+        self._score_label.setStyleSheet("font-size: 20px; color: #666;")
         frame_layout.addWidget(self._score_label)
 
         self._message_label = QLabel("")
         self._message_label.setAlignment(Qt.AlignCenter)
-        self._message_label.setStyleSheet("font-size: 11px; color: #888;")
+        self._message_label.setStyleSheet("font-size: 18px; color: #888;")
         self._message_label.setWordWrap(True)
         frame_layout.addWidget(self._message_label)
 

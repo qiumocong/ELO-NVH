@@ -38,14 +38,6 @@ class LabelerWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        self._status_bar = StatusBarWidget()
-        main_layout.addWidget(self._status_bar)
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("color: #ddd;")
-        main_layout.addWidget(sep)
-
         content = QWidget()
         content_layout = QHBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -53,11 +45,11 @@ class LabelerWindow(QMainWindow):
 
         # ========== 左侧面板 ==========
         left_panel = QWidget()
-        left_panel.setFixedWidth(400)
+        left_panel.setFixedWidth(320)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(12, 20, 12, 12)
-        left_layout.setSpacing(6)
+        left_layout.setSpacing(8)
 
         # 工位信息
         self._info_labels = {}
@@ -100,6 +92,16 @@ class LabelerWindow(QMainWindow):
         sep2.setFrameShape(QFrame.HLine)
         sep2.setStyleSheet("color: #ccc;")
         left_layout.addWidget(sep2)
+
+        # 连接状态 + 检测状态
+        self._status_bar = StatusBarWidget()
+        left_layout.addWidget(self._status_bar)
+
+        # 分隔
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.HLine)
+        sep3.setStyleSheet("color: #ccc;")
+        left_layout.addWidget(sep3)
 
         # 左侧标注面板
         self._labeler_left = LabelerPanel("left")
@@ -179,7 +181,7 @@ class LabelerWindow(QMainWindow):
             for ch in VIBRATION_CHANNELS:
                 chart = self._charts[side][ch]
                 if len(chart._values) >= 16:
-                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values))
+                    self._spectrum_charts[side][ch].update_from_time_data(list(chart._values), list(chart._times))
 
     def _on_info(self, msg: dict):
         side = msg.get("side", "left")

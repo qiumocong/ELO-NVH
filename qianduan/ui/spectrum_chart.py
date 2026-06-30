@@ -29,6 +29,7 @@ class SpectrumChart(QWidget):
     def __init__(self, channel: str, parent=None):
         super().__init__(parent)
         self.channel = channel
+        self._first_update = True  # 调试用
         self._setup_ui()
 
     def _resolve(self):
@@ -46,7 +47,7 @@ class SpectrumChart(QWidget):
         layout.setSpacing(2)
 
         label = QLabel(display_title)
-        label.setStyleSheet("font-size: 11px; font-weight: bold; color: #444;")
+        label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         layout.addWidget(label)
 
         # pyqtgraph 绘图组件
@@ -57,11 +58,15 @@ class SpectrumChart(QWidget):
         self._plot_widget.setLabel("left", "频率", units="Hz")
         self._plot_widget.setMinimumHeight(120)
 
-        # 缩小坐标轴刻度字体
+        # 坐标轴刻度字体缩小，禁用自动 SI 前缀
         axis_font = pg.QtGui.QFont()
         axis_font.setPointSize(8)
-        self._plot_widget.getAxis('left').setStyle(tickFont=axis_font)
-        self._plot_widget.getAxis('bottom').setStyle(tickFont=axis_font)
+        for ax_name in ('left', 'bottom'):
+            axis = self._plot_widget.getAxis(ax_name)
+            axis.setStyle(tickFont=axis_font)
+            axis.enableAutoSIPrefix(False)
+            lf = pg.QtGui.QFont(); lf.setPointSize(8)
+            axis.label.setFont(lf)
 
         # 热力图图层
         self._image_item = pg.ImageItem()
@@ -76,44 +81,54 @@ class SpectrumChart(QWidget):
 
         layout.addWidget(self._plot_widget)
 
-    def update_from_time_data(self, time_values: list):
+    def update_from_time_data(self, time_values: list, timestamps: list = None):
         """
         接收时域数据，做 STFT，画时频热力图。
 
         参数:
             time_values: 最新的时域数据列表
+            timestamps: 对应的时间戳列表（可选，用于自动推算采样率）
         """
         if len(time_values) < 64:
             return
 
-        # STFT 参数：窗口 256 点，步进 64 点
-        times, freqs, magnitudes = compute_stft(
-            time_values,
-            sample_rate=SAMPLE_RATE,
-            window_size=256,
-            hop_size=64,
-        )
+        # 根据实际时间戳推算采样率，否则用配置默认值
+        sr = SAMPLE_RATE
+        if timestamps and len(timestamps) > 1:
+            dt = (timestamps[-1] - timestamps[0]) / (len(timestamps) - 1)
+            if dt > 0:
+                sr = 1.0 / dt
 
-        if magnitudes.size == 0:
-            return
+        try:
+            times, freqs, magnitudes = compute_stft(
+                time_values,
+                sample_rate=int(sr),
+                window_size=256,
+                hop_size=64,
+            )
 
-        # 用 dB 刻度显示，动态范围更清晰
-        mag_db = 20 * np.log10(magnitudes + 1e-10)
+            if magnitudes.size == 0:
+                return
 
-        # 固定显示范围 -60dB ~ 0dB，让颜色分布更均匀
-        # 不用 autoLevels，否则纯信号会把噪底压成全蓝
-        self._image_item.setLevels([-60, 0])
+            if self._first_update:
+                print(f"[频谱] {self.channel}: {len(time_values)}点 → {magnitudes.shape[1]}帧 × {magnitudes.shape[0]}频段")
+                self._first_update = False
 
-        # 设置图片的位置和缩放：让坐标轴对齐真实的时间和频率
-        t_min = times[0] if len(times) > 0 else 0
-        t_max = times[-1] if len(times) > 0 else 1
-        f_min = freqs[0]
-        f_max = freqs[-1]
-        self._image_item.setRect(t_min, f_min, t_max - t_min, f_max - f_min)
+            mag_db = 20 * np.log10(magnitudes + 1e-10)
 
-        # ImageItem 期望数据 shape = (width, height)，即 (时间帧数, 频率数)
-        # 当前 magnitudes shape = (频率数, 时间帧数)，需要转置
-        self._image_item.setImage(mag_db.T)
+            self._image_item.setLevels([-60, 0])
+
+            t_min = times[0] if len(times) > 0 else 0
+            t_max = times[-1] if len(times) > 0 else 1
+            if t_max == t_min:
+                t_max = t_min + 0.1
+            f_min = freqs[0]
+            f_max = freqs[-1]
+            self._image_item.setRect(t_min, f_min, t_max - t_min, f_max - f_min)
+
+            self._image_item.setImage(mag_db.T)
+        except Exception as e:
+            print(f"[频谱错误] {self.channel}: {e}")
 
     def clear(self):
         """清空数据"""

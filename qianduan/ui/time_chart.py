@@ -35,7 +35,7 @@ class TimeChart(QWidget):
     }
 
     UNITS = {
-        "x": "g", "y": "g", "z": "g", "current": "A",
+        "x": "m/s²", "y": "m/s²", "z": "m/s²", "current": "A",
     }
 
     SIDE_NAMES = {"left": "左", "right": "右"}
@@ -47,8 +47,9 @@ class TimeChart(QWidget):
         """
         super().__init__(parent)
         self.channel = channel
-        self._times = collections.deque(maxlen=MAX_POINTS)
-        self._values = collections.deque(maxlen=MAX_POINTS)
+        maxlen = MAX_POINTS if MAX_POINTS > 0 else None
+        self._times = collections.deque(maxlen=maxlen)
+        self._values = collections.deque(maxlen=maxlen)
         self._setup_ui()
 
     def _resolve(self):
@@ -67,7 +68,7 @@ class TimeChart(QWidget):
         layout.setSpacing(2)
 
         label = QLabel(display_label)
-        label.setStyleSheet("font-size: 11px; font-weight: bold; color: #444;")
+        label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         layout.addWidget(label)
 
         self._plot_widget = pg.PlotWidget()
@@ -78,10 +79,15 @@ class TimeChart(QWidget):
         self._plot_widget.setLabel("left", y_label, units=self.UNITS.get(base, ""))
         self._plot_widget.setMinimumHeight(100)
 
+        # 坐标轴刻度字体缩小，禁用自动 SI 前缀（避免 0.7A 显示为 700mA）
         axis_font = pg.QtGui.QFont()
         axis_font.setPointSize(8)
-        self._plot_widget.getAxis('left').setStyle(tickFont=axis_font)
-        self._plot_widget.getAxis('bottom').setStyle(tickFont=axis_font)
+        for ax_name in ('left', 'bottom'):
+            axis = self._plot_widget.getAxis(ax_name)
+            axis.setStyle(tickFont=axis_font)
+            axis.enableAutoSIPrefix(False)
+            lf = pg.QtGui.QFont(); lf.setPointSize(8)
+            axis.label.setFont(lf)
 
         color = self.COLORS.get(base, "#333")
         pen = pg.mkPen(color=color, width=1.5)
