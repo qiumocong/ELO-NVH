@@ -1,10 +1,9 @@
 import asyncio
 import json
-import os
 from collections import deque
 import websockets
-from config import WS_PORT, MODEL_DIR
 
+# ---- 全局状态 ----
 left_data = deque(maxlen=1)
 right_data = deque(maxlen=1)
 
@@ -17,28 +16,7 @@ connected_clients = set()
 ws_loop = None
 pending_label = {"left": None, "right": None}
 
-# ---------- 新增：数据入队使能 ----------
-data_enabled = {"left": True, "right": True}   # 默认启用，按需调整
-
-def enable_data(side, enabled):
-    """启用/禁用指定工位的数据入队，禁用时会清空已有数据"""
-    data_enabled[side] = enabled
-    if not enabled:
-        clear_data(side)
-
-def clear_data(side):
-    """清空指定工位的缓存数据"""
-    if side == "left":
-        left_data.clear()
-    else:
-        right_data.clear()
-
-# ---------- 原有函数（修改 put_data） ----------
-def get_model_list():
-    if not os.path.exists(MODEL_DIR):
-        return []
-    return [f[:-4] for f in os.listdir(MODEL_DIR) if f.endswith('.pth')]
-
+# ---- 服务启动 ----
 def start_ws_server():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -47,18 +25,21 @@ def start_ws_server():
     loop.run_until_complete(ws_main())
 
 async def ws_main():
-    async with websockets.serve(handler, "0.0.0.0", WS_PORT):
-        print(f"[WebSocket] 服务启动 ws://localhost:{WS_PORT}")
+    async with websockets.serve(handler, "0.0.0.0", 8081):
+        print("[WebSocket] 服务启动 ws://localhost:8081")
         asyncio.create_task(data_broadcast_loop())
-        await asyncio.Future()
+        await asyncio.Future()  # 永久运行
 
+# ---- 客户端连接处理 ----
 async def handler(websocket, path):
     connected_clients.add(websocket)
     try:
+        # 发送模型列表（示例，可从配置读取）
         await websocket.send(json.dumps({
             "type": "model_list",
-            "models": get_model_list()
+            "models": ["model_A", "model_B"]
         }))
+        # 发送当前状态
         for side in ["left", "right"]:
             info = station_info[side]
             await websocket.send(json.dumps({
@@ -68,19 +49,21 @@ async def handler(websocket, path):
                 "spec": info["spec"],
                 "mode": info["mode"]
             }))
+        # 接收消息
         async for message in websocket:
             try:
                 data = json.loads(message)
                 msg_type = data.get("type")
                 if msg_type == "select_model":
                     print(f"[WS] 选择模型: {data.get('model_id')}")
+                    # 可回发确认
                     await websocket.send(json.dumps({
                         "type": "model_selected",
                         "model": data.get('model_id')
                     }))
                 elif msg_type == "label":
                     side = data.get("side")
-                    label = data.get("label")
+                    label = data.get("label")  # 1=合格, 0=不合格
                     if side in pending_label:
                         pending_label[side] = label
                         print(f"[WS] 人工标注 {side} -> {label}")
@@ -95,10 +78,11 @@ async def handler(websocket, path):
     finally:
         connected_clients.remove(websocket)
 
+# ---- 数据广播循环 ----
 async def data_broadcast_loop():
     while True:
         broadcast_data_batch()
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.05)  # 50ms间隔
 
 def broadcast_data_batch():
     if not connected_clients:
@@ -107,6 +91,7 @@ def broadcast_data_batch():
     right_block = right_data[-1] if right_data else None
     if left_block is None and right_block is None:
         return
+    # 取时间（优先使用左工位）
     time_vals = left_block["time"] if left_block else right_block["time"]
     msg = {
         "type": "data_batch",
@@ -124,7 +109,9 @@ def broadcast_data_batch():
     for ws in list(connected_clients):
         asyncio.run_coroutine_threadsafe(ws.send(json_msg), ws_loop)
 
+# ---- 对外接口 ----
 def update_station_info(side, barcode, spec, mode):
+    """更新工位信息并推送给前端"""
     station_info[side] = {"barcode": barcode, "spec": spec, "mode": mode}
     msg = json.dumps({
         "type": "info",
@@ -137,10 +124,11 @@ def update_station_info(side, barcode, spec, mode):
         asyncio.run_coroutine_threadsafe(ws.send(msg), ws_loop)
 
 def send_result(side, result, score, message):
+    """发送检测结果"""
     msg = json.dumps({
         "type": "result",
         "side": side,
-        "result": result,
+        "result": result,      # "OK" 或 "NG"
         "score": score,
         "message": message
     })
@@ -148,9 +136,10 @@ def send_result(side, result, score, message):
         asyncio.run_coroutine_threadsafe(ws.send(msg), ws_loop)
 
 def put_data(side, time_array, data_2d):
-    # 检查该工位是否允许数据入队
-    if not data_enabled.get(side, True):
-        return
+    """
+    存储最近一块数据，供广播使用
+    data_2d: (5, samples) 顺序为 [x, y, z, voltage, current]
+    """
     time_list = time_array.tolist()
     n = len(time_list)
     d = {
@@ -158,7 +147,7 @@ def put_data(side, time_array, data_2d):
         "x": data_2d[0].tolist() if data_2d.shape[0] > 0 else [0.0]*n,
         "y": data_2d[1].tolist() if data_2d.shape[0] > 1 else [0.0]*n,
         "z": data_2d[2].tolist() if data_2d.shape[0] > 2 else [0.0]*n,
-        "current": data_2d[4].tolist() if data_2d.shape[0] > 4 else [0.0]*n
+        "current": data_2d[4].tolist() if data_2d.shape[0] > 4 else [0.0]*n  # 第5通道为电流
     }
     if side == "left":
         left_data.append(d)
@@ -166,6 +155,7 @@ def put_data(side, time_array, data_2d):
         right_data.append(d)
 
 def get_pending_label(side):
+    """获取并清除未处理的人工标注"""
     val = pending_label.get(side)
     pending_label[side] = None
     return val

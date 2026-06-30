@@ -40,16 +40,23 @@ class PLCClient:
         self.client.batchwrite_wordunits(register, values)
 
     def read_bit(self, register):
-        """读取位寄存器 (如 R30.1)"""
+        """
+        读取位寄存器 (如 R30.1)
+        返回 True/False
+        """
+        # 解析寄存器名称，如 "R30.1"
         if '.' in register:
             word_reg, bit_pos = register.split('.')
             word_value = self.read_word(word_reg)
             bit_pos = int(bit_pos)
             return bool(word_value & (1 << bit_pos))
         else:
+            # 如果是字寄存器，读取整个值
             return self.read_word(register) != 0
 
+    # ---- 数据读取（PLC主动发送的数据） ----
     def read_barcode(self, start_reg, max_len=40):
+        """读取条码字符串（PLC已写入）"""
         words = self.read_words(start_reg, max_len)
         text = ""
         for w in words:
@@ -67,6 +74,7 @@ class PLCClient:
         return text.strip()
 
     def read_product_spec(self, max_len=10):
+        """读取产品规格名（PLC已写入）"""
         words = self.read_words(PLC_PRODUCT_REG, max_len)
         text = ""
         for w in words:
@@ -84,30 +92,37 @@ class PLCClient:
         return text.strip()
 
     def read_mode(self):
+        """读取模式（PLC已写入）"""
         return self.read_word(PLC_MODE_REG)
 
+    # ---- PLC命令读取（PLC主动发送） ----
     def read_plc_command(self, name):
+        """读取PLC发送的命令"""
         reg = STATIONS[name]["plc_cmd_reg"]
         return self.read_word(reg)
 
-    def read_data_ready(self, name):
-        reg = STATIONS[name]["data_ready_reg"]
-        return self.read_bit(reg)
-
-    def read_reset_signal(self, name):
-        reg = STATIONS[name]["reset_reg"]
-        return self.read_bit(reg)
-
+    # ---- PC状态写入（PC主动响应） ----
     def write_pc_status(self, name, status):
+        """写入PC状态（PLC读取）"""
         reg = STATIONS[name]["pc_status_reg"]
         self.write_word(reg, status)
 
+    # ---- 结果写入（PC主动写入） ----
     def write_result(self, name, result_code):
+        """写入判定结果（PLC读取）"""
         reg = STATIONS[name]["pc_result_reg"]
         self.write_word(reg, result_code)
+        # 设置结果就绪标志
         ready_reg = STATIONS[name]["pc_result_ready"]
         self.write_word(ready_reg, 1)
 
     def read_manual_result(self, name):
+        """读取人工判定结果（PLC写入）"""
         reg = STATIONS[name]["manual_result_reg"]
         return self.read_word(reg)
+
+    # ---- 重置信号读取 ----
+    def read_reset_signal(self, name):
+        """读取重置信号 (左工位 R30.1, 右工位 R30.2)"""
+        reg = STATIONS[name]["reset_reg"]
+        return self.read_bit(reg)
