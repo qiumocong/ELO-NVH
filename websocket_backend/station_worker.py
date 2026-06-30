@@ -24,6 +24,7 @@ class StationWorker:
         self.current_spec = ""
         self.current_mode = 0
         self.state = PC_STATUS_IDLE
+        self.is_collecting = False  # 标记是否正在采集
 
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -34,7 +35,9 @@ class StationWorker:
             self.thread.join(timeout=2.0)
 
     def on_data_chunk(self, t_chunk, data_chunk):
-        websocket_server.put_data(self.name, t_chunk, data_chunk)
+        """采集回调：只有在采集状态下才推送数据到WebSocket"""
+        if self.is_collecting and self.running:
+            websocket_server.put_data(self.name, t_chunk, data_chunk)
 
     def save_per_channel(self, t, data, label):
         label_str = "OK" if label == 0 else "NG"
@@ -124,6 +127,7 @@ class StationWorker:
 
     def reset_flow(self):
         print(f"[{self.name}] 重置流程...")
+        self.is_collecting = False
         try:
             shared_daq.stop()
         except:
@@ -254,6 +258,9 @@ class StationWorker:
 
                 print(f"[{self.name}] 收到START命令，开始采集...")
 
+                # 标记采集状态
+                self.is_collecting = True
+
                 if not shared_daq.is_running:
                     shared_daq.start()
                     time.sleep(0.5)
@@ -345,6 +352,9 @@ class StationWorker:
 
                 print(f"[{self.name}] 收到STOP命令，停止采集...")
 
+                # 停止采集，不再推送数据
+                self.is_collecting = False
+
                 # ---- 获取采集数据 ----
                 if self.name == "left":
                     t, data = shared_daq.get_left_data()
@@ -360,11 +370,6 @@ class StationWorker:
                     self.state = PC_STATUS_IDLE
                     continue
 
-                # ---- 回复完成 ----
-                self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
-                self.state = PC_STATUS_IDLE
-                print(f"[{self.name}] 处理完成\n")
-
                 # ---- 执行推理 ----
                 label, score = self._do_inference(data)
 
@@ -376,6 +381,11 @@ class StationWorker:
                 # ---- 保存数据 ----
                 self.save_per_channel(t, data, label)
 
+                # ---- 回复完成 ----
+                self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
+                self.state = PC_STATUS_IDLE
+                print(f"[{self.name}] 处理完成\n")
+
             except Exception as e:
                 if "重置" in str(e):
                     continue
@@ -386,6 +396,7 @@ class StationWorker:
                     self.plc.write_pc_status(self.name, PC_STATUS_ERROR)
                 except:
                     pass
+                self.is_collecting = False
                 self.state = PC_STATUS_IDLE
                 time.sleep(1)
 

@@ -104,7 +104,7 @@ try:
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,
-        units=AccelUnits.METERS_PER_SECOND_SQUARED
+        units=AccelUnits.G
     )
 
     # 第二个9234模块 (3通道加速度计)
@@ -116,15 +116,15 @@ try:
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,
-        units=AccelUnits.METERS_PER_SECOND_SQUARED
+        units=AccelUnits.G
     )
 
     # 9239模块 - 常规电压通道 (无激励)
     # 所有4个通道一起添加 (0-10V输入)
-    task.ai_channels.add_ai_current_chan(
-        "cDAQ1Mod3/ai0:2",
-        min_val=0.0, max_val=0.004,
-        units=CurrentUnits.AMPS,
+    task.ai_channels.add_ai_voltage_chan(
+        "cDAQ1Mod3/ai0:3",
+        min_val=0.0, max_val=10,
+        units=VoltageUnits.VOLTS,
         terminal_config=TerminalConfiguration.DIFF
     )
 

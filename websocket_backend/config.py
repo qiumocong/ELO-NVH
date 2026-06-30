@@ -14,23 +14,24 @@ PLC_PRODUCT_REG = "R11"        # 规格名（10个字）
 
 # ---------- 心跳 ----------
 HEARTBEAT_REG = "R999"        # 心跳寄存器（公共）
-HEARTBEAT_INTERVAL = 3.0      # 心跳间隔（秒），增加到3秒
+HEARTBEAT_INTERVAL = 3.0      # 心跳间隔（秒）
 
 # 工位配置
 STATIONS = {
     "left": {
         "barcode_start": "R100",
         "barcode_len": 40,
-        "plc_cmd_reg": "R140",        # PLC写入命令，PC读取
-        "pc_status_reg": "R150",      # PC写入状态，PLC读取
-        "pc_result_reg": "R151",      # PC写入结果，PLC读取
-        "pc_result_ready": "R152",    # PC结果就绪标志
-        "manual_result_reg": "R141",  # PLC写入人工判定，PC读取
-        "reset_reg": "R30.1",         # 重置信号寄存器 (bit)
-        "data_ready_reg": "R30.3",    # 数据就绪信号 (bit)
+        "plc_cmd_reg": "R140",
+        "pc_status_reg": "R150",
+        "pc_result_reg": "R151",
+        "pc_result_ready": "R152",
+        "manual_result_reg": "R141",
+        "reset_reg": "R30.1",
+        "data_ready_reg": "R30.3",
         "accel_channels": "cDAQ1Mod1/ai0:2",
-        "voltage_channel": "cDAQ1Mod3/ai0",
-        "current_channel": "cDAQ1Mod3/ai2",
+        # 左工位: 电压=AI2, 电流=AI3
+        "voltage_channel": "cDAQ1Mod3/ai2",
+        "current_channel": "cDAQ1Mod3/ai3",
         "input_indices": [0, 1, 2],
     },
     "right": {
@@ -44,8 +45,9 @@ STATIONS = {
         "reset_reg": "R30.2",
         "data_ready_reg": "R30.4",
         "accel_channels": "cDAQ1Mod2/ai0:2",
-        "voltage_channel": "cDAQ1Mod3/ai1",
-        "current_channel": "cDAQ1Mod3/ai3",
+        # 右工位: 电压=AI0, 电流=AI1
+        "voltage_channel": "cDAQ1Mod3/ai0",
+        "current_channel": "cDAQ1Mod3/ai1",
         "input_indices": [0, 1, 2],
     }
 }
@@ -70,8 +72,8 @@ MODEL_IN_CH = len(STATIONS["left"]["input_indices"])
 MODEL_NUM_CLASSES = 2
 
 # ---------- NI 采集 ----------
-SAMPLE_RATE = 2400              # 降低采样率减少CPU占用
-CHUNK_SAMPLES = 500             # 降低块大小
+SAMPLE_RATE = 2400
+CHUNK_SAMPLES = 500
 MAX_COLLECT_TIME = 60.0
 RANGE_9234 = (-50.0, 50.0)
 SENSITIVITY = 100
