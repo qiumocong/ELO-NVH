@@ -85,7 +85,8 @@ CURRENT_SENSOR_MAX = 30.0
 MODEL_DIR = os.path.join(SAVE_DIR, "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 DEFAULT_MODEL_PATH = os.path.join(MODEL_DIR, "default.pth")
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cpu")
 
 # ---------- 数据保存 ----------
 DATA_SAVE_DIR = os.path.join(SAVE_DIR, "saved_data")
