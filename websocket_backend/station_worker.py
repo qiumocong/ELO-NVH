@@ -9,6 +9,8 @@ from plc_manager import plc_manager
 from shared_data_acquisition import shared_daq
 from model_inference import get_model_for_spec, preprocess, predict
 import websocket_server
+import matplotlib.pyplot as plt
+from scipy.io import wavfile
 
 
 class StationWorker:
@@ -61,7 +63,99 @@ class StationWorker:
             ch_path = os.path.join(save_dir, f"ch{i}.csv")
             df = pd.DataFrame({"time": t, f"ch{i}": data[i, :]})
             df.to_csv(ch_path, index=False)
-        print(f"[{self.name}] 数据已保存至 {save_dir}")
+        print(f"[{self.name}] 训练数据已保存至 {save_dir}")
+
+    def _save_positive_negative_data(self, t1, data1, t2, data2, label):
+        """
+        保存正转（第一段）和反转（第二段）数据、图像、音频
+        目录结构：NEW_DATA_SAVE_DIR/{年}/{年月日}/{OK/NG}/{条码}/{时分}/
+            forward/  (正转数据、图像、音频)
+            backward/ (反转数据、图像、音频)
+        """
+        if not ENABLE_NEW_SAVE:
+            return
+
+        try:
+            # 构建时间目录
+            now = datetime.now()
+            year = now.strftime("%Y")
+            ymd = now.strftime("%Y%m%d")
+            hm = now.strftime("%H%M")
+            label_str = "OK" if label == 0 else "NG"
+            safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
+            if not safe_barcode:
+                safe_barcode = f"NOBARCODE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            base_dir = os.path.join(NEW_DATA_SAVE_DIR, year, ymd, label_str, safe_barcode, hm)
+            os.makedirs(base_dir, exist_ok=True)
+
+            # 保存正转（forward）和反转（backward）数据
+            segments = [
+                ("forward", t1, data1),
+                ("backward", t2, data2)
+            ]
+
+            for seg_name, t, data in segments:
+                if t.size == 0:
+                    continue
+                seg_dir = os.path.join(base_dir, seg_name)
+                os.makedirs(seg_dir, exist_ok=True)
+
+                # 保存 CSV（5通道：x,y,z,voltage,current）
+                csv_path = os.path.join(seg_dir, f"{seg_name}_data.csv")
+                df = pd.DataFrame({
+                    "time": t,
+                    "x": data[0, :],
+                    "y": data[1, :],
+                    "z": data[2, :],
+                    "voltage": data[3, :],
+                    "current": data[4, :]
+                })
+                df.to_csv(csv_path, index=False)
+
+                # 生成振动时域图（x,y,z）
+                fig_vib, ax_vib = plt.subplots(figsize=(10, 6))
+                ax_vib.plot(t, data[0, :], label="X", alpha=0.8)
+                ax_vib.plot(t, data[1, :], label="Y", alpha=0.8)
+                ax_vib.plot(t, data[2, :], label="Z", alpha=0.8)
+                ax_vib.set_xlabel("时间 (s)")
+                ax_vib.set_ylabel("加速度 (m/s²)")
+                ax_vib.set_title(f"{self.name} {seg_name} 振动信号")
+                ax_vib.legend()
+                ax_vib.grid(True)
+                vib_img_path = os.path.join(seg_dir, f"{seg_name}_vibration.png")
+                plt.savefig(vib_img_path, dpi=150, bbox_inches="tight")
+                plt.close(fig_vib)
+
+                # 生成电流图（与电压一起，或单独电流）
+                fig_cur, ax_cur = plt.subplots(figsize=(10, 6))
+                ax_cur.plot(t, data[4, :], label="Current", color="red")
+                ax_cur.set_xlabel("时间 (s)")
+                ax_cur.set_ylabel("电流 (A)")
+                ax_cur.set_title(f"{self.name} {seg_name} 电流信号")
+                ax_cur.legend()
+                ax_cur.grid(True)
+                cur_img_path = os.path.join(seg_dir, f"{seg_name}_current.png")
+                plt.savefig(cur_img_path, dpi=150, bbox_inches="tight")
+                plt.close(fig_cur)
+
+                # 生成音频（使用 x 轴振动信号）
+                # 归一化到 [-1, 1]，再转为 int16
+                audio_data = data[0, :]
+                if np.max(np.abs(audio_data)) > 0:
+                    audio_norm = audio_data / np.max(np.abs(audio_data))
+                else:
+                    audio_norm = audio_data
+                audio_int16 = (audio_norm * 32767).astype(np.int16)
+                audio_path = os.path.join(seg_dir, f"{seg_name}_audio.wav")
+                wavfile.write(audio_path, int(self.sr), audio_int16)
+
+            print(f"[{self.name}] 数据已保存至 {base_dir}")
+
+        except Exception as e:
+            print(f"[{self.name}] 数据保存失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     def read_plc_data(self):
         self.current_barcode = self.plc.read_barcode(
@@ -379,6 +473,7 @@ class StationWorker:
                 print(f"[{self.name}] 结果已写入: {result_code}")
 
                 # 保存数据
+                self._save_positive_negative_data(t1, data1, t2, data2, label)
                 self.save_per_channel(t, data, label)
 
                 # 回复完成

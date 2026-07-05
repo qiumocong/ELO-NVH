@@ -1,4 +1,6 @@
 import os
+import time
+
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -33,9 +35,11 @@ def test_model(csv_path, model_path):
     data = data.permute(1, 0).unsqueeze(0).to(device)  # Permute to [batch_size, channels, sequence_length]
 
     with torch.no_grad():
+        print(time.time())
         logits = model(data)
         preds = torch.argmax(logits, dim=1)
         print(f"预测结果: {preds.cpu().numpy().tolist()}")
+        print(time.time())
         return preds.cpu().numpy().tolist()[0]
 
 

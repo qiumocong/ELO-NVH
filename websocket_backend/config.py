@@ -108,3 +108,8 @@ TRAIN_CONFIG = {
     "max_len": None,
     "min_samples_per_spec": 5,
 }
+
+# ---------- 新增存储配置 ----------
+NEW_DATA_SAVE_DIR = "D:/DATA"   # 新数据根目录
+ENABLE_NEW_SAVE = True                                         # 是否启用新保存逻辑
+os.makedirs(NEW_DATA_SAVE_DIR, exist_ok=True)
