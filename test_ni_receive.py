@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from nidaqmx.constants import AcquisitionType, AccelSensitivityUnits, AccelUnits, ExcitationSource
-from nidaqmx.constants import TerminalConfiguration, VoltageUnits
+from nidaqmx.constants import TerminalConfiguration, VoltageUnits, CurrentUnits
 from nidaqmx.stream_readers import AnalogMultiChannelReader
 
 # ========== 解决matplotlib中文乱码/字体警告 ==========
@@ -104,7 +104,7 @@ try:
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,
-        units=AccelUnits.METERS_PER_SECOND_SQUARED
+        units=AccelUnits.G
     )
 
     # 第二个9234模块 (3通道加速度计)
@@ -116,17 +116,16 @@ try:
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,
-        units=AccelUnits.METERS_PER_SECOND_SQUARED
+        units=AccelUnits.G
     )
 
     # 9239模块 - 常规电压通道 (无激励)
     # 所有4个通道一起添加 (0-10V输入)
     task.ai_channels.add_ai_voltage_chan(
-        physical_channel="cDAQ1Mod3/ai0:3",
-        min_val=-10.0,
-        max_val=10.0,
+        "cDAQ1Mod3/ai0:3",
+        min_val=0.0, max_val=10,
         units=VoltageUnits.VOLTS,
-        terminal_config=TerminalConfiguration.DIFF  # 9239只支持差分
+        terminal_config=TerminalConfiguration.DIFF
     )
 
     # 配置采样时钟 - 增加缓冲区大小
