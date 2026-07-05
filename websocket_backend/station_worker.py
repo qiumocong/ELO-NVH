@@ -12,6 +12,10 @@ import websocket_server
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 
+# 设置 matplotlib 中文字体
+plt.rcParams["font.sans-serif"] = ["SimHei"]
+plt.rcParams["axes.unicode_minus"] = False
+
 
 class StationWorker:
     def __init__(self, name):
@@ -29,7 +33,7 @@ class StationWorker:
         self.state = PC_STATUS_IDLE
         self.is_collecting = False
 
-        # 记录各段样本索引
+        # 记录各段样本索引（使用工位独立的样本计数）
         self.start_sample = 0
         self.first_end_sample = 0
         self.second_start_sample = 0
@@ -66,17 +70,11 @@ class StationWorker:
         print(f"[{self.name}] 训练数据已保存至 {save_dir}")
 
     def _save_positive_negative_data(self, t1, data1, t2, data2, label):
-        """
-        保存正转（第一段）和反转（第二段）数据、图像、音频
-        目录结构：NEW_DATA_SAVE_DIR/{年}/{年月日}/{OK/NG}/{条码}/{时分}/
-            forward/  (正转数据、图像、音频)
-            backward/ (反转数据、图像、音频)
-        """
+        """保存正转/反转数据、各轴振动图、电流图、音频（三轴）"""
         if not ENABLE_NEW_SAVE:
             return
 
         try:
-            # 构建时间目录
             now = datetime.now()
             year = now.strftime("%Y")
             ymd = now.strftime("%Y%m%d")
@@ -89,11 +87,7 @@ class StationWorker:
             base_dir = os.path.join(NEW_DATA_SAVE_DIR, year, ymd, label_str, safe_barcode, hm)
             os.makedirs(base_dir, exist_ok=True)
 
-            # 保存正转（forward）和反转（backward）数据
-            segments = [
-                ("forward", t1, data1),
-                ("backward", t2, data2)
-            ]
+            segments = [("forward", t1, data1), ("backward", t2, data2)]
 
             for seg_name, t, data in segments:
                 if t.size == 0:
@@ -101,7 +95,7 @@ class StationWorker:
                 seg_dir = os.path.join(base_dir, seg_name)
                 os.makedirs(seg_dir, exist_ok=True)
 
-                # 保存 CSV（5通道：x,y,z,voltage,current）
+                # 1. CSV
                 csv_path = os.path.join(seg_dir, f"{seg_name}_data.csv")
                 df = pd.DataFrame({
                     "time": t,
@@ -113,21 +107,21 @@ class StationWorker:
                 })
                 df.to_csv(csv_path, index=False)
 
-                # 生成振动时域图（x,y,z）
-                fig_vib, ax_vib = plt.subplots(figsize=(10, 6))
-                ax_vib.plot(t, data[0, :], label="X", alpha=0.8)
-                ax_vib.plot(t, data[1, :], label="Y", alpha=0.8)
-                ax_vib.plot(t, data[2, :], label="Z", alpha=0.8)
-                ax_vib.set_xlabel("时间 (s)")
-                ax_vib.set_ylabel("加速度 (m/s²)")
-                ax_vib.set_title(f"{self.name} {seg_name} 振动信号")
-                ax_vib.legend()
-                ax_vib.grid(True)
-                vib_img_path = os.path.join(seg_dir, f"{seg_name}_vibration.png")
-                plt.savefig(vib_img_path, dpi=150, bbox_inches="tight")
-                plt.close(fig_vib)
+                # 2. 三轴振动图（分开保存）
+                axes_plot = [(0, "X", "red"), (1, "Y", "green"), (2, "Z", "blue")]
+                for ax_idx, ax_label, color in axes_plot:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.plot(t, data[ax_idx, :], label=f"{ax_label} 轴", color=color)
+                    ax.set_xlabel("时间 (s)")
+                    ax.set_ylabel("加速度 (m/s^2)")
+                    ax.set_title(f"{self.name} {seg_name} 振动信号 - {ax_label}轴")
+                    ax.legend()
+                    ax.grid(True)
+                    img_path = os.path.join(seg_dir, f"{seg_name}_vibration_{ax_label}.png")
+                    plt.savefig(img_path, dpi=150, bbox_inches="tight")
+                    plt.close(fig)
 
-                # 生成电流图（与电压一起，或单独电流）
+                # 3. 电流图
                 fig_cur, ax_cur = plt.subplots(figsize=(10, 6))
                 ax_cur.plot(t, data[4, :], label="Current", color="red")
                 ax_cur.set_xlabel("时间 (s)")
@@ -139,21 +133,22 @@ class StationWorker:
                 plt.savefig(cur_img_path, dpi=150, bbox_inches="tight")
                 plt.close(fig_cur)
 
-                # 生成音频（使用 x 轴振动信号）
-                # 归一化到 [-1, 1]，再转为 int16
-                audio_data = data[0, :]
-                if np.max(np.abs(audio_data)) > 0:
-                    audio_norm = audio_data / np.max(np.abs(audio_data))
-                else:
-                    audio_norm = audio_data
-                audio_int16 = (audio_norm * 32767).astype(np.int16)
-                audio_path = os.path.join(seg_dir, f"{seg_name}_audio.wav")
-                wavfile.write(audio_path, int(self.sr), audio_int16)
+                # 4. 音频（三个轴分别生成）
+                axes_audio = [(0, "X"), (1, "Y"), (2, "Z")]
+                for ax_idx, ax_label in axes_audio:
+                    audio_data = data[ax_idx, :]
+                    if np.max(np.abs(audio_data)) > 0:
+                        audio_norm = audio_data / np.max(np.abs(audio_data))
+                    else:
+                        audio_norm = audio_data
+                    audio_int16 = (audio_norm * 32767).astype(np.int16)
+                    audio_path = os.path.join(seg_dir, f"{seg_name}_audio_{ax_label}.wav")
+                    wavfile.write(audio_path, int(SAMPLE_RATE), audio_int16)
 
-            print(f"[{self.name}] 数据已保存至 {base_dir}")
+            print(f"[{self.name}] 新格式数据已保存至 {base_dir}")
 
         except Exception as e:
-            print(f"[{self.name}] 数据保存失败: {e}")
+            print(f"[{self.name}] 新数据保存失败: {e}")
             import traceback
             traceback.print_exc()
 
@@ -343,13 +338,16 @@ class StationWorker:
                 print(f"[{self.name}] 收到START命令，开始采集...")
                 self.is_collecting = True
 
-                # 启动共享采集（如果未运行）
-                if not shared_daq.is_running:
-                    shared_daq.start(reset_time=True)
-                    time.sleep(0.5)
+                # 启动该工位的采集（独立延迟）
+                # reset_time=True, enable_delay=True 表示重置该工位数据并启用延迟
+                shared_daq.start_side(self.name, reset_time=True, enable_delay=True)
 
-                # 记录起始样本索引
-                self.start_sample = shared_daq.sample_count
+                # 记录起始样本索引（延迟结束后样本计数从0开始）
+                self.start_sample = 0
+                # 设置 first_end_sample 为 0，稍后更新
+                self.first_end_sample = 0
+                self.second_start_sample = 0
+                self.stop_sample = 0
 
                 self.plc.write_pc_status(self.name, PC_STATUS_COLLECTING)
                 self.state = PC_STATUS_COLLECTING
@@ -379,8 +377,9 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到FIRST_END命令")
-                self.is_collecting = False  # 停止推送
-                self.first_end_sample = shared_daq.sample_count
+                self.is_collecting = False  # 停止推送（但采集继续）
+                # 记录第一段结束的样本索引（使用该工位的样本计数）
+                self.first_end_sample = shared_daq.get_sample_count(self.name)
                 self.plc.write_pc_status(self.name, PLC_CMD_FIRST_END)
 
                 # 阶段4: 等待SECOND_START命令
@@ -408,7 +407,10 @@ class StationWorker:
 
                 print(f"[{self.name}] 收到SECOND_START命令")
                 self.is_collecting = True  # 恢复推送
-                self.second_start_sample = shared_daq.sample_count
+                # 恢复采集（不重置，不延迟），时间连续
+                shared_daq.start_side(self.name, reset_time=False, enable_delay=False)
+                # 记录第二段起始样本索引
+                self.second_start_sample = shared_daq.get_sample_count(self.name)
                 self.plc.write_pc_status(self.name, PLC_CMD_SECOND_START)
 
                 # 阶段5: 等待STOP命令
@@ -436,10 +438,10 @@ class StationWorker:
 
                 print(f"[{self.name}] 收到STOP命令，停止采集...")
                 self.is_collecting = False
-                self.stop_sample = shared_daq.sample_count
+                self.stop_sample = shared_daq.get_sample_count(self.name)
 
                 # 获取该工位的数据段（两段拼接）
-                # 第一段: start_sample ~ first_end_sample
+                # 第一段: start_sample (0) ~ first_end_sample
                 t1, data1 = shared_daq.get_data_slice(self.name, self.start_sample, self.first_end_sample)
                 # 第二段: second_start_sample ~ stop_sample
                 t2, data2 = shared_daq.get_data_slice(self.name, self.second_start_sample, self.stop_sample)
@@ -472,13 +474,14 @@ class StationWorker:
                 self.plc.write_result(self.name, result_code)
                 print(f"[{self.name}] 结果已写入: {result_code}")
 
-                # 保存数据
-                self._save_positive_negative_data(t1, data1, t2, data2, label)
-                self.save_per_channel(t, data, label)
-
                 # 回复完成
                 self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.state = PC_STATUS_IDLE
+
+                # 保存数据（新格式和旧格式）
+                self._save_positive_negative_data(t1, data1, t2, data2, label)
+                self.save_per_channel(t, data, label)
+
                 print(f"[{self.name}] 处理完成\n")
                 # 清空WebSocket缓冲（只清空本工位）
                 websocket_server.clear_buffer(self.name)

@@ -104,7 +104,7 @@ try:
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,
-        units=AccelUnits.G
+        units=AccelUnits.METERS_PER_SECOND_SQUARED
     )
 
     # 第二个9234模块 (3通道加速度计)
@@ -116,7 +116,7 @@ try:
         sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
         current_excit_source=ExcitationSource.INTERNAL,
         current_excit_val=0.002,
-        units=AccelUnits.G
+        units=AccelUnits.METERS_PER_SECOND_SQUARED
     )
 
     # 9239模块 - 常规电压通道 (无激励)
