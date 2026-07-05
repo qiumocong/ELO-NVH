@@ -11,6 +11,7 @@ from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.labeler_panel import LabelerPanel
+from ui.settings_dialog import SettingsDialog
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -100,6 +101,21 @@ class LabelerWindow(QMainWindow):
         self._status_bar = StatusBarWidget()
         left_layout.addWidget(self._status_bar)
 
+        # 设置按钮
+        from PyQt5.QtWidgets import QPushButton
+        self._settings_btn = QPushButton("振动图设置")
+        self._settings_btn.setFixedHeight(32)
+        self._settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #607D8B; color: white;
+                border: none; border-radius: 4px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #546E7A; }
+        """)
+        self._settings_btn.clicked.connect(self._on_settings)
+        left_layout.addWidget(self._settings_btn)
+
         # 左侧标注面板
         self._labeler_left = LabelerPanel("left")
         left_layout.addWidget(self._labeler_left, stretch=1)
@@ -148,6 +164,23 @@ class LabelerWindow(QMainWindow):
 
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content, stretch=1)
+
+    def _on_settings(self):
+        dlg = SettingsDialog(self)
+        if dlg.exec_() != dlg.Accepted:
+            return
+        if dlg.auto_mode:
+            for side in SIDES:
+                for ch in VIBRATION_CHANNELS:
+                    self._charts[side][ch]._plot_widget.enableAutoRange(y=True)
+            return
+        y_min, y_max = dlg.values
+        if y_min >= y_max:
+            return
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                self._charts[side][ch]._plot_widget.setYRange(y_min, y_max)
+                self._charts[side][ch]._plot_widget.enableAutoRange(y=False)
 
     def _clear_side(self, side: str):
         for ch in ALL_CHANNELS:

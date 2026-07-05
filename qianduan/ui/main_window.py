@@ -25,6 +25,7 @@ from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.result_panel import ResultPanel
+from ui.settings_dialog import SettingsDialog
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -120,6 +121,21 @@ class MainWindow(QMainWindow):
         self._status_bar = StatusBarWidget()
         left_layout.addWidget(self._status_bar)
 
+        # 设置按钮
+        from PyQt5.QtWidgets import QPushButton
+        self._settings_btn = QPushButton("振动图设置")
+        self._settings_btn.setFixedHeight(32)
+        self._settings_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #607D8B; color: white;
+                border: none; border-radius: 4px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #546E7A; }
+        """)
+        self._settings_btn.clicked.connect(self._on_settings)
+        left_layout.addWidget(self._settings_btn)
+
         # 左检测结果
         self._result_panel_left = ResultPanel("左侧检测结果")
         left_layout.addWidget(self._result_panel_left, stretch=1)
@@ -177,6 +193,27 @@ class MainWindow(QMainWindow):
         self._side_time_offset[side] = 0.0
         self._data_started = False
         self._spectrum_tick = 0
+
+    def _on_settings(self):
+        dlg = SettingsDialog(self)
+        if dlg.exec_() != dlg.Accepted:
+            return
+
+        if dlg.auto_mode:
+            # 恢复自动范围
+            for side in SIDES:
+                for ch in VIBRATION_CHANNELS:
+                    self._charts[side][ch]._plot_widget.enableAutoRange(y=True)
+            return
+
+        y_min, y_max = dlg.values
+        if y_min >= y_max:
+            return
+
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                self._charts[side][ch]._plot_widget.setYRange(y_min, y_max)
+                self._charts[side][ch]._plot_widget.enableAutoRange(y=False)
 
     def connect_data_source(self, source):
         self._source = source
