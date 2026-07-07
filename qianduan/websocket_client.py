@@ -96,8 +96,9 @@ class WebSocketClient(QObject):
                     self._connected = True
                     self.connection_changed.emit(True)  # 通知主线程：已连接
                     await self._receive_loop(ws)         # 开始接收消息
-            except Exception:
-                pass  # 连接失败，等一会儿重试
+            except Exception as e:
+                if self._running:  # 第一次重试时打印
+                    print(f"[WS] 连接失败 ({type(e).__name__}: {e})，{self.reconnect_interval}s 后重试...")
             finally:
                 self._ws = None
                 self._connected = False

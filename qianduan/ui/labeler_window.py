@@ -12,6 +12,7 @@ from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.labeler_panel import LabelerPanel
 from ui.settings_dialog import SettingsDialog
+from ui.scale_dialog import ScaleDialog
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -31,7 +32,8 @@ class LabelerWindow(QMainWindow):
         self._spectrum_charts = {side: {} for side in SIDES}
         self._spectrum_tick = 0
         self._side_has_data = {"left": False, "right": False}
-        self._side_time_offset = {"left": 0.0, "right": 0.0}
+        self._side_next_time = {"left": 0.0, "right": 0.0}
+        self._vib_scale = 1.0
 
         self._setup_ui()
 
@@ -116,6 +118,20 @@ class LabelerWindow(QMainWindow):
         self._settings_btn.clicked.connect(self._on_settings)
         left_layout.addWidget(self._settings_btn)
 
+        # 数据缩放按钮
+        self._scale_btn = QPushButton("数据缩放")
+        self._scale_btn.setFixedHeight(32)
+        self._scale_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #795548; color: white;
+                border: none; border-radius: 4px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #6D4C41; }
+        """)
+        self._scale_btn.clicked.connect(self._on_scale_settings)
+        left_layout.addWidget(self._scale_btn)
+
         # 左侧标注面板
         self._labeler_left = LabelerPanel("left")
         left_layout.addWidget(self._labeler_left, stretch=1)
@@ -182,6 +198,25 @@ class LabelerWindow(QMainWindow):
                 self._charts[side][ch]._plot_widget.setYRange(y_min, y_max)
                 self._charts[side][ch]._plot_widget.enableAutoRange(y=False)
 
+    def _on_scale_settings(self):
+        dlg = ScaleDialog(self, self._vib_scale * 100)
+        if dlg.exec_() != dlg.Accepted:
+            return
+        new_scale = dlg.scale_factor
+        if new_scale == self._vib_scale:
+            return
+        ratio = new_scale / self._vib_scale
+        self._vib_scale = new_scale
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                chart = self._charts[side][ch]
+                if chart._values:
+                    chart._values = [v * ratio for v in chart._values]
+                    chart._update_plot()
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                self._spectrum_charts[side][ch].clear()
+
     def _clear_side(self, side: str):
         for ch in ALL_CHANNELS:
             self._charts[side][ch].clear()
@@ -192,7 +227,7 @@ class LabelerWindow(QMainWindow):
         else:
             self._labeler_right.clear()
         self._side_has_data[side] = False
-        self._side_time_offset[side] = 0.0
+        self._side_next_time[side] = 0.0
         self._spectrum_tick = 0
 
     def connect_data_source(self, source):
@@ -206,22 +241,29 @@ class LabelerWindow(QMainWindow):
     def _on_data(self, msg: dict):
         times = msg.get("time", [])
         if not times:
-            t = msg.get("timestamp", 0)
-            times = [t]
             for side in SIDES:
                 for ch in ALL_CHANNELS:
                     val = msg.get(f"{side}_{ch}")
                     if val is not None:
-                        self._charts[side][ch].add_data([t], [val])
+                        t0 = self._side_next_time[side]
+                        self._side_next_time[side] = t0 + 1.0 / 4800
+                        self._charts[side][ch].add_data([t0], [val])
         else:
             for side in SIDES:
                 has = False
                 for ch in ALL_CHANNELS:
                     values = msg.get(f"{side}_{ch}", [])
                     if values:
-                        if not self._side_has_data[side]:
-                            self._side_time_offset[side] = times[0]
-                        local_times = [t - self._side_time_offset[side] for t in times]
+                        t0 = self._side_next_time[side]
+                        if times and len(times) > 1:
+                            dt = (times[-1] - times[0]) / (len(times) - 1)
+                        else:
+                            dt = 1.0 / 4800
+                        n = len(values)
+                        local_times = [t0 + i * dt for i in range(n)]
+                        self._side_next_time[side] = local_times[-1] + dt
+                        if ch in VIBRATION_CHANNELS and self._vib_scale != 1.0:
+                            values = [v * self._vib_scale for v in values]
                         self._charts[side][ch].add_data(local_times, values)
                         has = True
                 if has:
