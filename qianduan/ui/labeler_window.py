@@ -34,6 +34,10 @@ class LabelerWindow(QMainWindow):
         self._side_has_data = {"left": False, "right": False}
         self._side_next_time = {"left": 0.0, "right": 0.0}
         self._vib_scale = 1.0
+        self._last_batch_id = {"left": -1, "right": -1}
+        self._diag_rx_count = 0
+        self._diag_rx_dup = 0
+        self._diag_start_time = None
 
         self._setup_ui()
 
@@ -228,6 +232,7 @@ class LabelerWindow(QMainWindow):
             self._labeler_right.clear()
         self._side_has_data[side] = False
         self._side_next_time[side] = 0.0
+        self._last_batch_id[side] = -1
         self._spectrum_tick = 0
 
     def connect_data_source(self, source):
@@ -240,33 +245,50 @@ class LabelerWindow(QMainWindow):
 
     def _on_data(self, msg: dict):
         times = msg.get("time", [])
+        if times and len(times) > 1:
+            dt = (times[-1] - times[0]) / (len(times) - 1)
+        else:
+            dt = 1.0 / 2400
+        # 诊断
+        if self._diag_start_time is None:
+            import time as _diag_time
+            self._diag_start_time = _diag_time.monotonic()
+        self._diag_rx_count += 1
         if not times:
             for side in SIDES:
+                has = False
+                t0 = self._side_next_time[side]
                 for ch in ALL_CHANNELS:
                     val = msg.get(f"{side}_{ch}")
                     if val is not None:
-                        t0 = self._side_next_time[side]
-                        self._side_next_time[side] = t0 + 1.0 / 4800
                         self._charts[side][ch].add_data([t0], [val])
+                        has = True
+                if has:
+                    self._side_next_time[side] = t0 + 1.0 / 2400
         else:
             for side in SIDES:
+                bid = msg.get(f"{side}_batch_id", -1)
+                if bid == self._last_batch_id[side] and bid != -1:
+                    self._diag_rx_dup += 1
+                    continue
+                self._last_batch_id[side] = bid
                 has = False
+                max_n = 0
+                t0 = self._side_next_time[side]
                 for ch in ALL_CHANNELS:
                     values = msg.get(f"{side}_{ch}", [])
                     if values:
-                        t0 = self._side_next_time[side]
-                        if times and len(times) > 1:
-                            dt = (times[-1] - times[0]) / (len(times) - 1)
-                        else:
-                            dt = 1.0 / 4800
                         n = len(values)
+                        max_n = max(max_n, n)
                         local_times = [t0 + i * dt for i in range(n)]
-                        self._side_next_time[side] = local_times[-1] + dt
                         if ch in VIBRATION_CHANNELS and self._vib_scale != 1.0:
-                            values = [v * self._vib_scale for v in values]
-                        self._charts[side][ch].add_data(local_times, values)
+                            scaled = [v * self._vib_scale for v in values]
+                            self._charts[side][ch].add_data(local_times, scaled)
+                        else:
+                            self._charts[side][ch].add_data(local_times, values)
                         has = True
                 if has:
+                    self._side_next_time[side] = t0 + max_n * dt
                     self._side_has_data[side] = True
 
         self._spectrum_tick += 1
@@ -277,6 +299,12 @@ class LabelerWindow(QMainWindow):
                     if len(chart._values) >= 64:
                         self._spectrum_charts[side][ch].update_from_time_data(
                             chart._values, chart._times)
+        if self._diag_rx_count % 50 == 0:
+            import time as _diag_time
+            elapsed = _diag_time.monotonic() - self._diag_start_time
+            print(f"[标注诊断] rx={self._diag_rx_count} dup={self._diag_rx_dup} "
+                  f"elapsed={elapsed:.1f}s L_time={self._side_next_time['left']:.2f}s "
+                  f"R_time={self._side_next_time['right']:.2f}s")
 
     def _on_info(self, msg: dict):
         side = msg.get("side", "left")

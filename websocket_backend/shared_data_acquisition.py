@@ -244,7 +244,9 @@ class SharedDataAcquisition:
             buffer_all = np.zeros((10, self.chunk), dtype=np.float64)
 
             task.start()
-            print("[共享采集] NI任务已启动，10通道同时采集")
+            actual_rate = task.timing.samp_clk_rate
+            print(f"[共享采集] NI任务已启动，10通道同时采集")
+            print(f"[共享采集] 实际采样时钟: {actual_rate} Hz (配置: {self.sr})")
 
             start_time = time.time()
 

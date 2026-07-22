@@ -50,7 +50,12 @@ class MainWindow(QMainWindow):
         self._spectrum_tick = 0
         self._side_has_data = {"left": False, "right": False}
         self._side_next_time = {"left": 0.0, "right": 0.0}
-        self._vib_scale = 1.0  # 振动数据缩放比例
+        self._vib_scale = 1.0
+        # 按侧 batch 去重 & 诊断
+        self._last_batch_id = {"left": -1, "right": -1}
+        self._diag_rx_count = 0
+        self._diag_rx_dup = 0
+        self._diag_start_time = None
 
         self._setup_ui()
 
@@ -207,6 +212,7 @@ class MainWindow(QMainWindow):
             self._result_panel_right.clear()
         self._side_has_data[side] = False
         self._side_next_time[side] = 0.0
+        self._last_batch_id[side] = -1
         self._data_started = False
         self._spectrum_tick = 0
 
@@ -265,37 +271,62 @@ class MainWindow(QMainWindow):
             self._data_started = True
             self._status_bar.set_detect_status("检测中")
         times = msg.get("time", [])
+        # 计算采样间隔 dt（每条消息统一，不依赖后端共享 time 的绝对值）
+        if times and len(times) > 1:
+            dt = (times[-1] - times[0]) / (len(times) - 1)
+        else:
+            dt = 1.0 / 2400  # fallback，与后端 2400Hz 一致
+        # 诊断日志（累计统计）
+        if self._diag_start_time is None:
+            import time as _diag_time
+            self._diag_start_time = _diag_time.monotonic()
+            self._diag_rx_count = 0
+            self._diag_rx_dup = 0
+        self._diag_rx_count += 1
+        bseq = msg.get("broadcast_seq", -1)
+        lbid = msg.get("left_batch_id", -1)
+        rbid = msg.get("right_batch_id", -1)
         if not times:
+            # --- 单点数据分支 ---
             for side in SIDES:
+                has = False
+                t0 = self._side_next_time[side]
                 for ch in ALL_CHANNELS:
                     val = msg.get(f"{side}_{ch}")
                     if val is not None:
-                        t0 = self._side_next_time[side]
-                        self._side_next_time[side] = t0 + 1.0 / 4800
                         self._charts[side][ch].add_data([t0], [val])
+                        has = True
+                if has:
+                    self._side_next_time[side] = t0 + 1.0 / 2400
         else:
+            # --- 批量数据分支 ---
             for side in SIDES:
+                # 按侧 batch_id 去重
+                bid = msg.get(f"{side}_batch_id", -1)
+                if bid == self._last_batch_id[side] and bid != -1:
+                    self._diag_rx_dup += 1
+                    continue  # 跳过重复批次
+                self._last_batch_id[side] = bid
+
                 has = False
+                max_n = 0
+                t0 = self._side_next_time[side]        # ← 每侧一次，通道循环外
                 for ch in ALL_CHANNELS:
                     values = msg.get(f"{side}_{ch}", [])
                     if values:
-                        # 各侧独立生成连续时间，不依赖后端共享的 time 数组
-                        t0 = self._side_next_time[side]
-                        if times and len(times) > 1:
-                            dt = (times[-1] - times[0]) / (len(times) - 1)
-                        else:
-                            dt = 1.0 / 4800  # fallback
                         n = len(values)
+                        max_n = max(max_n, n)
                         local_times = [t0 + i * dt for i in range(n)]
-                        self._side_next_time[side] = local_times[-1] + dt
-                        # 振动通道应用缩放，电流不变
                         if ch in VIBRATION_CHANNELS and self._vib_scale != 1.0:
-                            values = [v * self._vib_scale for v in values]
-                        self._charts[side][ch].add_data(local_times, values)
+                            scaled = [v * self._vib_scale for v in values]
+                            self._charts[side][ch].add_data(local_times, scaled)
+                        else:
+                            self._charts[side][ch].add_data(local_times, values)
                         has = True
                 if has:
+                    self._side_next_time[side] = t0 + max_n * dt  # ← 更新一次
                     self._side_has_data[side] = True
-        # 频谱图每 200ms 更新一次，减少全量数据拷贝和渲染压力
+        # 频谱图每 200ms 更新一次
         self._spectrum_tick += 1
         if self._spectrum_tick % 4 == 0:
             for side in SIDES:
@@ -304,6 +335,14 @@ class MainWindow(QMainWindow):
                     if len(chart._values) >= 64:
                         self._spectrum_charts[side][ch].update_from_time_data(
                             chart._values, chart._times)
+        # 每 50 条消息打印诊断摘要
+        if self._diag_rx_count % 50 == 0:
+            import time as _diag_time
+            elapsed = _diag_time.monotonic() - self._diag_start_time
+            print(f"[前端诊断] rx={self._diag_rx_count} dup={self._diag_rx_dup} "
+                  f"elapsed={elapsed:.1f}s L_time={self._side_next_time['left']:.2f}s "
+                  f"R_time={self._side_next_time['right']:.2f}s "
+                  f"L_bid={self._last_batch_id['left']} R_bid={self._last_batch_id['right']}")
 
     def _on_result(self, msg: dict):
         result_text = msg.get("result", "")

@@ -1,11 +1,14 @@
 import asyncio
 import json
+import time as _time
 from collections import deque
 import websockets
 
 # ---- 全局状态 ----
 left_data = deque(maxlen=1)
 right_data = deque(maxlen=1)
+_left_batch_seq = 0
+_right_batch_seq = 0
 
 station_info = {
     "left": {"barcode": "", "spec": "", "mode": ""},
@@ -15,6 +18,7 @@ station_info = {
 connected_clients = set()
 ws_loop = None
 pending_label = {"left": None, "right": None}
+_broadcast_seq = 0  # 全局广播序号（诊断用）
 
 # ---- 服务启动 ----
 def start_ws_server():
@@ -85,14 +89,16 @@ async def data_broadcast_loop():
         await asyncio.sleep(0.05)  # 50ms间隔
 
 def broadcast_data_batch():
+    global _broadcast_seq
     if not connected_clients:
         return
     left_block = left_data[-1] if left_data else None
     right_block = right_data[-1] if right_data else None
     if left_block is None and right_block is None:
         return
-    # 取时间（优先使用左工位）
     time_vals = left_block["time"] if left_block else right_block["time"]
+    lbid = left_block["batch_id"] if left_block else -1
+    rbid = right_block["batch_id"] if right_block else -1
     msg = {
         "type": "data_batch",
         "time": time_vals,
@@ -103,8 +109,15 @@ def broadcast_data_batch():
         "right_x": right_block["x"] if right_block else [],
         "right_y": right_block["y"] if right_block else [],
         "right_z": right_block["z"] if right_block else [],
-        "right_current": right_block["current"] if right_block else []
+        "right_current": right_block["current"] if right_block else [],
+        "left_batch_id": lbid,
+        "right_batch_id": rbid,
+        "broadcast_seq": _broadcast_seq,
     }
+    _broadcast_seq += 1
+    print(f"[广播 #{msg['broadcast_seq']}] L_bid={lbid} (x={len(msg['left_x'])}点) "
+          f"R_bid={rbid} (x={len(msg['right_x'])}点) time_len={len(time_vals)} "
+          f"t={_time.monotonic():.3f}")
     json_msg = json.dumps(msg)
     for ws in list(connected_clients):
         asyncio.run_coroutine_threadsafe(ws.send(json_msg), ws_loop)
@@ -140,14 +153,23 @@ def put_data(side, time_array, data_2d):
     存储最近一块数据，供广播使用
     data_2d: (5, samples) 顺序为 [x, y, z, voltage, current]
     """
+    global _left_batch_seq, _right_batch_seq
     time_list = time_array.tolist()
     n = len(time_list)
+    if side == "left":
+        _left_batch_seq += 1
+        bid = _left_batch_seq
+    else:
+        _right_batch_seq += 1
+        bid = _right_batch_seq
     d = {
         "time": time_list,
         "x": data_2d[0].tolist() if data_2d.shape[0] > 0 else [0.0]*n,
         "y": data_2d[1].tolist() if data_2d.shape[0] > 1 else [0.0]*n,
         "z": data_2d[2].tolist() if data_2d.shape[0] > 2 else [0.0]*n,
-        "current": data_2d[4].tolist() if data_2d.shape[0] > 4 else [0.0]*n  # 第5通道为电流
+        "current": data_2d[4].tolist() if data_2d.shape[0] > 4 else [0.0]*n,
+        "batch_id": bid,
+        "created_at": _time.monotonic(),
     }
     if side == "left":
         left_data.append(d)
