@@ -245,7 +245,7 @@ class StationWorker:
 
         else:  # 人工
             print(f"[{self.name}] 等待人工判定...")
-            timeout = 30
+            timeout = 300
             start_wait = time.time()
             result_val = None
 
@@ -438,6 +438,8 @@ class StationWorker:
 
                 print(f"[{self.name}] 收到STOP命令，停止采集...")
                 self.is_collecting = False
+                # PLC 要求 5s 内回 900 握手确认
+                self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.stop_sample = shared_daq.get_sample_count(self.name)
 
                 # 获取该工位的数据段（两段拼接）
@@ -456,8 +458,6 @@ class StationWorker:
                     t, data = t2, data2
                 else:
                     t, data = np.array([]), np.empty((5, 0))
-
-                self.state = PC_STATUS_PROCESSING
 
                 if t.size == 0:
                     print(f"[{self.name}] 无数据")
