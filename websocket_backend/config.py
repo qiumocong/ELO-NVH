@@ -80,7 +80,7 @@ SENSITIVITY = 100
 SENSOR_OUTPUT_MAX = 10.0
 VOLTAGE_SENSOR_MAX = 36.0
 CURRENT_SENSOR_MAX = 30.0
-START_DELAY =0.8 # 延迟开始采集时间（秒）
+START_DELAY =0.0 # 延迟开始采集时间（秒）
 
 # ---------- 模型 ----------
 MODEL_DIR = os.path.join(SAVE_DIR, "models")
