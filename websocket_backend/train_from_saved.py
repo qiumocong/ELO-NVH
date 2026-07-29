@@ -18,19 +18,19 @@ class VibrationDataset(Dataset):
         self.samples = []
         self.input_indices = input_indices
         self.max_len = max_len
+        spec_path = os.path.join(data_dir, spec_name)
+        if not os.path.isdir(spec_path):
+            return
         for label_name in [OK_DIRNAME, NG_DIRNAME]:
             label = 0 if label_name == OK_DIRNAME else 1
-            label_path = os.path.join(data_dir, label_name)
+            label_path = os.path.join(spec_path, label_name)
             if not os.path.isdir(label_path):
                 continue
             for barcode in os.listdir(label_path):
                 barcode_path = os.path.join(label_path, barcode)
                 if not os.path.isdir(barcode_path):
                     continue
-                spec_path = os.path.join(barcode_path, spec_name)
-                if not os.path.isdir(spec_path):
-                    continue
-                ch_files = [f for f in os.listdir(spec_path) if f.startswith("ch") and f.endswith(".csv")]
+                ch_files = [f for f in os.listdir(barcode_path) if f.startswith("ch") and f.endswith(".csv")]
                 if not ch_files:
                     continue
                 ch_files.sort(key=lambda x: int(re.search(r'\d+', x).group()))
@@ -38,7 +38,7 @@ class VibrationDataset(Dataset):
                 max_len_sample = 0
                 for ch_file in ch_files:
                     ch_idx = int(re.search(r'\d+', ch_file).group())
-                    df = pd.read_csv(os.path.join(spec_path, ch_file))
+                    df = pd.read_csv(os.path.join(barcode_path, ch_file))
                     if 'time' not in df.columns:
                         continue
                     vals = df.iloc[:, 1].values
@@ -193,18 +193,16 @@ def train_spec(spec_name, data_dir, model_dir):
 # ---------- 主函数 ----------
 def train_all_specs():
     spec_set = set()
-    for label_name in [OK_DIRNAME, NG_DIRNAME]:
-        label_path = os.path.join(DATA_SAVE_DIR, label_name)
-        if not os.path.isdir(label_path):
+    for spec in os.listdir(DATA_SAVE_DIR):
+        spec_path = os.path.join(DATA_SAVE_DIR, spec)
+        if not os.path.isdir(spec_path):
             continue
-        for barcode in os.listdir(label_path):
-            barcode_path = os.path.join(label_path, barcode)
-            if not os.path.isdir(barcode_path):
+        for label_name in [OK_DIRNAME, NG_DIRNAME]:
+            label_path = os.path.join(spec_path, label_name)
+            if not os.path.isdir(label_path):
                 continue
-            for spec in os.listdir(barcode_path):
-                spec_path = os.path.join(barcode_path, spec)
-                if os.path.isdir(spec_path):
-                    spec_set.add(spec)
+            if os.listdir(label_path):   # 该标签下有数据才算
+                spec_set.add(spec)
     if not spec_set:
         print("未找到任何规格数据，请检查 DATA_SAVE_DIR")
         return
