@@ -13,6 +13,11 @@ from ui.spectrum_chart import SpectrumChart
 from ui.labeler_panel import LabelerPanel
 from ui.settings_dialog import SettingsDialog
 from ui.scale_dialog import ScaleDialog
+from ui.system_settings_dialog import SystemSettingsDialog
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app_config import load as load_runtime_config, save as save_runtime_config
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -34,12 +39,27 @@ class LabelerWindow(QMainWindow):
         self._side_has_data = {"left": False, "right": False}
         self._side_next_time = {"left": 0.0, "right": 0.0}
         self._vib_scale = 1.0
+        self._runtime_config = load_runtime_config()
+        self._vib_scale = float(self._runtime_config.get("vibration_scale", 1.0))
         self._last_batch_id = {"left": -1, "right": -1}
         self._diag_rx_count = 0
         self._diag_rx_dup = 0
         self._diag_start_time = None
 
         self._setup_ui()
+        self._restore_visual_settings()
+
+    def _restore_visual_settings(self):
+        cfg = self._runtime_config
+        if cfg.get("y_axis_auto", True):
+            return
+        y_min, y_max = float(cfg.get("y_axis_min", -1.0)), float(cfg.get("y_axis_max", 1.0))
+        if y_min >= y_max:
+            return
+        for side in SIDES:
+            for ch in VIBRATION_CHANNELS:
+                self._charts[side][ch]._plot_widget.setYRange(y_min, y_max)
+                self._charts[side][ch]._plot_widget.enableAutoRange(y=False)
 
     def _setup_ui(self):
         central = QWidget()
@@ -136,6 +156,11 @@ class LabelerWindow(QMainWindow):
         self._scale_btn.clicked.connect(self._on_scale_settings)
         left_layout.addWidget(self._scale_btn)
 
+        self._system_settings_btn = QPushButton("系统设置")
+        self._system_settings_btn.setFixedHeight(32)
+        self._system_settings_btn.clicked.connect(self._on_system_settings)
+        left_layout.addWidget(self._system_settings_btn)
+
         # 左侧标注面板
         self._labeler_left = LabelerPanel("left")
         left_layout.addWidget(self._labeler_left, stretch=1)
@@ -186,10 +211,13 @@ class LabelerWindow(QMainWindow):
         main_layout.addWidget(content, stretch=1)
 
     def _on_settings(self):
-        dlg = SettingsDialog(self)
+        cfg = self._runtime_config
+        dlg = SettingsDialog(self, cfg.get("y_axis_min", -1.0), cfg.get("y_axis_max", 1.0))
         if dlg.exec_() != dlg.Accepted:
             return
         if dlg.auto_mode:
+            self._runtime_config["y_axis_auto"] = True
+            save_runtime_config(self._runtime_config)
             for side in SIDES:
                 for ch in VIBRATION_CHANNELS:
                     self._charts[side][ch]._plot_widget.enableAutoRange(y=True)
@@ -197,6 +225,8 @@ class LabelerWindow(QMainWindow):
         y_min, y_max = dlg.values
         if y_min >= y_max:
             return
+        self._runtime_config.update({"y_axis_auto": False, "y_axis_min": y_min, "y_axis_max": y_max})
+        save_runtime_config(self._runtime_config)
         for side in SIDES:
             for ch in VIBRATION_CHANNELS:
                 self._charts[side][ch]._plot_widget.setYRange(y_min, y_max)
@@ -211,6 +241,8 @@ class LabelerWindow(QMainWindow):
             return
         ratio = new_scale / self._vib_scale
         self._vib_scale = new_scale
+        self._runtime_config["vibration_scale"] = new_scale
+        save_runtime_config(self._runtime_config)
         for side in SIDES:
             for ch in VIBRATION_CHANNELS:
                 chart = self._charts[side][ch]
@@ -220,6 +252,11 @@ class LabelerWindow(QMainWindow):
         for side in SIDES:
             for ch in VIBRATION_CHANNELS:
                 self._spectrum_charts[side][ch].clear()
+
+    def _on_system_settings(self):
+        dlg = SystemSettingsDialog(self)
+        if dlg.exec_() == dlg.Accepted:
+            self._runtime_config = dlg.values
 
     def _clear_side(self, side: str):
         for ch in ALL_CHANNELS:

@@ -1,83 +1,50 @@
-# Yanpu 振动噪声检测（PLC + 前端 + 模型推理）
+# Yanpu 振动质检系统
 
-本项目实现了完整最小闭环：
+Yanpu 是一套面向工业现场的双工位振动质检软件，包含 PyQt5 桌面前端、WebSocket 实时数据服务、NI-DAQmx 数据采集、三菱 PLC 流程控制和模型推理。原有模块和 WebSocket 消息协议保持不变；在此基础上增加了统一配置、日志轮转、可配置数据目录和 Windows exe 打包入口。
 
-1. 前端点击按钮发送 PLC 指令  
-2. 检测完成后读取固定路径 Excel/CSV 振动数据  
-3. 数据处理后送入训练好的模型进行测试  
-4. 前端显示振动波形与 OK/NG 结果
+## 目录
 
-## 新增运行模块
-
-- `app/plc_client.py`：PLC 通信（`mock` / `tcp`）  
-- `app/inference_service.py`：读取 Excel/CSV + 预处理 + 模型推理  
-- `app/service.py`：统一检测流程编排  
-- `app/api.py`：FastAPI 后端接口  
-- `app/desktop_app.py`：Tkinter 桌面前端（可打包 exe）  
-- `run_backend.py`：后端启动入口  
-- `run_frontend.py`：前端启动入口
-
-## 环境变量配置
-
-可通过环境变量配置运行参数（未设置则使用默认值）：
-
-- `YANPU_MODEL_PATH`：模型路径，默认 `logs/best_model.pth`
-- `YANPU_EXCEL_PATH`：检测文件路径，默认 `data/latest.xlsx`
-- `YANPU_BACKEND_HOST`：后端地址，默认 `127.0.0.1`
-- `YANPU_BACKEND_PORT`：后端端口，默认 `8000`
-- `YANPU_BACKEND_REQUEST_TIMEOUT_SEC`：前端请求后端超时秒数，默认 `30`
-- `YANPU_PLC_MODE`：`mock` 或 `tcp`，默认 `mock`
-- `YANPU_PLC_HOST`：PLC TCP 地址，默认 `127.0.0.1`
-- `YANPU_PLC_PORT`：PLC TCP 端口，默认 `5020`
-- `YANPU_PLC_TIMEOUT_SEC`：PLC 超时，默认 `2.0`
-- `YANPU_PLC_READ_RESPONSE`：是否读取响应，`1`/`0`
-
-## 启动方式
-
-### 1) 启动后端
-
-```bash
-python run_backend.py
+```text
+qianduan/             PyQt5 前端与标注工具
+websocket_backend/    WebSocket、PLC、NI 采集、推理与保存
+app_config.py         运行时 JSON 配置与日志
+app/desktop_app.py    单进程桌面启动器
+run_backend.py        仅启动后端的入口
+packaging/yanpu.spec  PyInstaller 配置
+build_windows.ps1     Windows 构建脚本
+软件说明书.md         操作和部署说明
 ```
 
-后端接口：
+## 源码运行
 
-- `GET /health`
-- `POST /detect`
+建议使用 Python 3.10/3.11 64 位环境，并安装 NI-DAQmx 驱动。依赖可按 `pyproject.toml` 安装：
 
-请求示例：
-
-```json
-{
-  "command": "START_DETECT",
-  "excel_path": "data/latest.xlsx"
-}
+```powershell
+python -m pip install -e .
+python -m app.desktop_app --mock       # 无 PLC 时使用模拟数据
+python -m app.desktop_app               # 连接本机 WebSocket 后端
+python run_backend.py                   # 仅启动后端
 ```
 
-### 2) 启动前端
+## 构建 exe
 
-```bash
-python run_frontend.py
+在 Windows 开发机执行：
+
+```powershell
+.\build_windows.ps1
 ```
 
-前端包含：
+产物为 `dist\Yanpu\Yanpu.exe`；发布时应复制整个 `dist\Yanpu` 目录。exe 启动时会自动在 `%APPDATA%\Yanpu` 创建配置、日志、模型和数据目录，不要求把数据写入安装目录。若需调试控制台，当前 spec 已保留控制台窗口，便于查看 PLC/采集错误。
 
-- 发送指令并检测按钮
-- 状态展示（进行中/成功/失败）
-- OK/NG 与置信度展示
-- 振动波形展示（time/ax/ay/az）
+## 配置与数据
 
-## 打包为 exe（示例）
+首次运行会生成 `%APPDATA%\Yanpu\config.json`。前端左侧“系统设置”可修改 WebSocket 地址、PLC 地址和端口、日志目录、训练数据目录、新格式数据目录、模型目录及新格式保存开关；保存后重启生效。原有“振动图设置”和“数据缩放”也会持久化。
 
-```bash
-pyinstaller --noconfirm --onefile --windowed --name yanpu_frontend run_frontend.py
-```
+日志文件为 `yanpu.log`，单文件 10 MB，保留 5 个轮转文件。原有旧格式数据和新格式 CSV/PNG/WAV 数据结构均保留。
 
-后端可单独打包或以 Python 服务方式部署。
+## 工程约束
 
-## 异常处理
-
-后端统一返回错误码：
-
-- `PLC_ERROR`：PLC 发送失败/超时
-- `INFERENCE_ERROR`：模型加载失败、文件不存在、格式错误、数据清洗后为空
+- 生产部署前确认 NI-DAQmx、PLC 网络和模型文件可用。
+- 修改端口后重启桌面程序，使后端和前端重新建立连接。
+- 设置目录必须具备读写权限；保存路径不可使用网络断开时不可用的临时盘。
+- 训练请使用 `websocket_backend/train_from_saved.py`，不会在检测启动时自动训练。

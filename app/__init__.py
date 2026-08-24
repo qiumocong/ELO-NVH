@@ -1,0 +1,2 @@
+"""Yanpu application launchers."""
+
