@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
 
         # ========== 顶部 header：logo 左上角 + 标题居中 ==========
         header = QWidget()
-        header.setFixedHeight(72)
+        header.setFixedHeight(144)
         header.setStyleSheet("background-color: white; border-bottom: 1px solid #e0e0e0;")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 10, 16, 10)
@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
             dpr = self.devicePixelRatioF()
             if dpr <= 0:
                 dpr = 1.0
-            logo_pixmap = logo_pixmap.scaledToHeight(int(52 * dpr), Qt.SmoothTransformation)
+            logo_pixmap = logo_pixmap.scaledToHeight(int(104 * dpr), Qt.SmoothTransformation)
             logo_pixmap.setDevicePixelRatio(dpr)
             self._logo_label.setPixmap(logo_pixmap)
         else:
@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
 
         # 标题（最上方居中）
         self._title_label = QLabel(APP_TITLE)
-        self._title_label.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        self._title_label.setStyleSheet("font-size: 52px; font-weight: bold; color: #2c3e50;")
         self._title_label.setAlignment(Qt.AlignCenter)
         header_layout.addWidget(self._title_label, 0, Qt.AlignCenter)
 
