@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QLabel, QFrame
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap
 from config import VIBRATION_CHANNELS
 from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
@@ -38,13 +39,16 @@ ALL_CHANNELS = ["x", "y", "z", "current"]
 
 SIDE_TITLES = {"left": "左工位", "right": "右工位"}
 
+APP_TITLE = "EOL-NVH智能检测系统"
+LOGO_PATH = str(Path(__file__).resolve().parent.parent / "yanpu_logo.png")
+
 
 class MainWindow(QMainWindow):
     """主窗口：双工位信息 + 双推理结果"""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("XXX 检测系统")
+        self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(1400, 800)
         self.resize(1600, 900)
 
@@ -85,6 +89,40 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+
+        # ========== 顶部 header：logo 左上角 + 标题居中 ==========
+        header = QWidget()
+        header.setFixedHeight(72)
+        header.setStyleSheet("background-color: white; border-bottom: 1px solid #e0e0e0;")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16, 10, 16, 10)
+        header_layout.setSpacing(16)
+
+        # logo（左上角）
+        self._logo_label = QLabel()
+        logo_pixmap = QPixmap(LOGO_PATH)
+        if not logo_pixmap.isNull():
+            dpr = self.devicePixelRatioF()
+            if dpr <= 0:
+                dpr = 1.0
+            logo_pixmap = logo_pixmap.scaledToHeight(int(52 * dpr), Qt.SmoothTransformation)
+            logo_pixmap.setDevicePixelRatio(dpr)
+            self._logo_label.setPixmap(logo_pixmap)
+        else:
+            self._logo_label.setText("[logo]")
+        header_layout.addWidget(self._logo_label, 0, Qt.AlignLeft)
+
+        header_layout.addStretch(1)
+
+        # 标题（最上方居中）
+        self._title_label = QLabel(APP_TITLE)
+        self._title_label.setStyleSheet("font-size: 26px; font-weight: bold; color: #2c3e50;")
+        self._title_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(self._title_label, 0, Qt.AlignCenter)
+
+        header_layout.addStretch(1)
+
+        main_layout.addWidget(header)
 
         # 主内容区
         content = QWidget()

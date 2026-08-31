@@ -5,6 +5,10 @@ build/
 dist/
 wheels/
 *.egg-info
+websocket_backend/logs/
+
+qianduan/view_data.py
+qianduan/csv_data_source.py
 
 # Virtual environments
 .venv
