@@ -3,27 +3,33 @@
 # ============================================================
 
 # WebSocket 服务器地址（后端提供的连接地址）
-WS_URL = "ws://127.0.0.1:8081"
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app_config import load as _load_runtime_config
+_runtime = _load_runtime_config()
+
+WS_URL = _runtime["ws_url"]
 
 # 断线后多久尝试重连（秒）
-RECONNECT_INTERVAL = 3
+RECONNECT_INTERVAL = _runtime["reconnect_interval"]
 
 # 每条曲线最多保留多少个数据点
 # ⚠ 必须 > 0，防止内存无限增长。值越大 x 轴显示时间越长
 # 4800Hz 下 288000 ≈ 60 秒，400000 ≈ 83 秒
 # 设为 0 表示不限制（仅 CSV 短期回放可用）
-MAX_POINTS = 400000
+MAX_POINTS = int(_runtime["max_points"])
 
 # FFT 计算时使用多少个数据点（必须是 2 的幂次方效果最好）
-FFT_WINDOW_SIZE = 1024
+FFT_WINDOW_SIZE = int(_runtime["fft_window_size"])
 
 # 采样频率：每秒采集多少个数据点（Hz）
 # 比如 1000 表示每秒 1000 个点，这个值需要和后端/传感器保持一致
-SAMPLE_RATE = 4800
+SAMPLE_RATE = int(_runtime["sample_rate"])
 
 # 图表刷新间隔：每隔多少毫秒刷新一次图表（毫秒）
 # 越小越流畅，但 CPU 占用越高
-CHART_REFRESH_INTERVAL = 50
+CHART_REFRESH_INTERVAL = int(_runtime["chart_refresh_interval"])
 
 # 所有数据通道的名称（对应后端发来的 JSON 字段名）
 CHANNELS = ["x", "y", "z", "current"]

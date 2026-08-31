@@ -3,6 +3,7 @@ import json
 import time as _time
 from collections import deque
 import websockets
+from config import BACKEND_HOST, BACKEND_PORT
 
 # ---- 全局状态 ----
 left_data = deque(maxlen=1)
@@ -29,8 +30,8 @@ def start_ws_server():
     loop.run_until_complete(ws_main())
 
 async def ws_main():
-    async with websockets.serve(handler, "0.0.0.0", 8081):
-        print("[WebSocket] 服务启动 ws://localhost:8081")
+    async with websockets.serve(handler, BACKEND_HOST, BACKEND_PORT):
+        print(f"[WebSocket] 服务启动 ws://localhost:{BACKEND_PORT}")
         asyncio.create_task(data_broadcast_loop())
         await asyncio.Future()  # 永久运行
 
