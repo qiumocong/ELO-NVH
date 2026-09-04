@@ -1,2 +1,1 @@
-"""Yanpu application launchers."""
-
+"""ELO-NVH application launchers."""

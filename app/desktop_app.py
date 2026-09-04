@@ -9,11 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else ROOT
 FRONTEND = ROOT / "qianduan"
 BACKEND = ROOT / "websocket_backend"
-for path in (ROOT, FRONTEND):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if not getattr(sys, "frozen", False):
+    for path in (ROOT, FRONTEND):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
 
 from app_config import configure_logging
+from app.ni_runtime import prepare_nidaqmx_runtime
 
 
 def _install_module_aliases(package, names):
@@ -25,8 +27,19 @@ def _install_module_aliases(package, names):
 
 def main():
     configure_logging()
+    if "--ni-self-test" in sys.argv:
+        prepare_nidaqmx_runtime()
+        import nidaqmx
+
+        task = nidaqmx.Task()
+        task.close()
+        print("[NI] NI-DAQmx 任务创建和关闭成功")
+        return 0
+
     if "--backend-only" in sys.argv:
-        sys.path.insert(0, str(BACKEND))
+        prepare_nidaqmx_runtime()
+        if not getattr(sys, "frozen", False):
+            sys.path.insert(0, str(BACKEND))
         _install_module_aliases("websocket_backend", [
             # The legacy backend uses absolute imports. Load aliases in their
             # dependency order so each module observes the backend config.
@@ -49,8 +62,8 @@ def main():
     from qianduan.config import WS_URL, RECONNECT_INTERVAL
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Yanpu 振动质检系统")
-    app.setOrganizationName("Yanpu")
+    app.setApplicationName("ELO-NVH 振动质检系统")
+    app.setOrganizationName("ELO-NVH")
     app.setFont(QFont("Microsoft YaHei", 10))
     window = MainWindow()
     if "--csv" in sys.argv:

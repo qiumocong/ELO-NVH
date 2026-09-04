@@ -5,6 +5,7 @@ from nidaqmx.constants import AcquisitionType, AccelSensitivityUnits, AccelUnits
 from nidaqmx.constants import TerminalConfiguration, VoltageUnits
 from nidaqmx.stream_readers import AnalogMultiChannelReader
 import threading
+from app.ni_runtime import prepare_nidaqmx_runtime
 from config import STATIONS, SAMPLE_RATE, CHUNK_SAMPLES, MAX_COLLECT_TIME
 from config import RANGE_9234, SENSITIVITY, SENSOR_OUTPUT_MAX
 from config import VOLTAGE_SENSOR_MAX, CURRENT_SENSOR_MAX, START_DELAY
@@ -196,6 +197,7 @@ class SharedDataAcquisition:
     def _acq_loop(self):
         task = None
         try:
+            prepare_nidaqmx_runtime()
             task = nidaqmx.Task()
 
             task.ai_channels.add_ai_accel_chan(

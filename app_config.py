@@ -1,4 +1,4 @@
-"""Shared runtime configuration for the Yanpu desktop application.
+"""Shared runtime configuration for the ELO-NVH desktop application.
 
 The JSON file is intentionally kept outside the executable so operators can
 change paths and communication settings without rebuilding the application.
@@ -14,10 +14,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
-APP_NAME = "Yanpu"
+APP_NAME = "ELO-NVH"
 PROJECT_ROOT = Path(__file__).resolve().parent
 if getattr(sys, "frozen", False):
-    USER_ROOT = Path(os.environ.get("APPDATA", Path.home())) / APP_NAME
+    # Keep operational files alongside the portable onedir application.
+    # The executable path is stable even though modules are loaded from
+    # PyInstaller's internal directory.
+    USER_ROOT = Path(sys.executable).resolve().parent
 else:
     USER_ROOT = PROJECT_ROOT
 

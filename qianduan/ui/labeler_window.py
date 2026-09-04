@@ -11,13 +11,11 @@ from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.labeler_panel import LabelerPanel
-from ui.settings_dialog import SettingsDialog
-from ui.scale_dialog import ScaleDialog
 from ui.system_settings_dialog import SystemSettingsDialog
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from app_config import load as load_runtime_config, save as save_runtime_config
+from app_config import load as load_runtime_config
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -127,11 +125,11 @@ class LabelerWindow(QMainWindow):
         self._status_bar = StatusBarWidget()
         left_layout.addWidget(self._status_bar)
 
-        # 设置按钮
+        # 统一设置入口：通信、存储和图表显示均在同一窗口中维护
         from PyQt5.QtWidgets import QPushButton
-        self._settings_btn = QPushButton("振动图设置")
-        self._settings_btn.setFixedHeight(32)
-        self._settings_btn.setStyleSheet("""
+        self._system_settings_btn = QPushButton("系统设置")
+        self._system_settings_btn.setFixedHeight(36)
+        self._system_settings_btn.setStyleSheet("""
             QPushButton {
                 background-color: #607D8B; color: white;
                 border: none; border-radius: 4px;
@@ -139,25 +137,6 @@ class LabelerWindow(QMainWindow):
             }
             QPushButton:hover { background-color: #546E7A; }
         """)
-        self._settings_btn.clicked.connect(self._on_settings)
-        left_layout.addWidget(self._settings_btn)
-
-        # 数据缩放按钮
-        self._scale_btn = QPushButton("数据缩放")
-        self._scale_btn.setFixedHeight(32)
-        self._scale_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #795548; color: white;
-                border: none; border-radius: 4px;
-                font-size: 13px;
-            }
-            QPushButton:hover { background-color: #6D4C41; }
-        """)
-        self._scale_btn.clicked.connect(self._on_scale_settings)
-        left_layout.addWidget(self._scale_btn)
-
-        self._system_settings_btn = QPushButton("系统设置")
-        self._system_settings_btn.setFixedHeight(32)
         self._system_settings_btn.clicked.connect(self._on_system_settings)
         left_layout.addWidget(self._system_settings_btn)
 
@@ -210,53 +189,41 @@ class LabelerWindow(QMainWindow):
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content, stretch=1)
 
-    def _on_settings(self):
-        cfg = self._runtime_config
-        dlg = SettingsDialog(self, cfg.get("y_axis_min", -1.0), cfg.get("y_axis_max", 1.0))
-        if dlg.exec_() != dlg.Accepted:
-            return
-        if dlg.auto_mode:
-            self._runtime_config["y_axis_auto"] = True
-            save_runtime_config(self._runtime_config)
+    def _apply_visual_settings(self, values):
+        """将系统设置中的显示部分立即应用到已有图表。"""
+        if values.get("y_axis_auto", True):
             for side in SIDES:
                 for ch in VIBRATION_CHANNELS:
                     self._charts[side][ch]._plot_widget.enableAutoRange(y=True)
-            return
-        y_min, y_max = dlg.values
-        if y_min >= y_max:
-            return
-        self._runtime_config.update({"y_axis_auto": False, "y_axis_min": y_min, "y_axis_max": y_max})
-        save_runtime_config(self._runtime_config)
-        for side in SIDES:
-            for ch in VIBRATION_CHANNELS:
-                self._charts[side][ch]._plot_widget.setYRange(y_min, y_max)
-                self._charts[side][ch]._plot_widget.enableAutoRange(y=False)
+        else:
+            y_min = float(values.get("y_axis_min", -1.0))
+            y_max = float(values.get("y_axis_max", 1.0))
+            if y_min < y_max:
+                for side in SIDES:
+                    for ch in VIBRATION_CHANNELS:
+                        plot = self._charts[side][ch]._plot_widget
+                        plot.setYRange(y_min, y_max)
+                        plot.enableAutoRange(y=False)
 
-    def _on_scale_settings(self):
-        dlg = ScaleDialog(self, self._vib_scale * 100)
-        if dlg.exec_() != dlg.Accepted:
+        new_scale = float(values.get("vibration_scale", 1.0))
+        if new_scale <= 0 or new_scale == self._vib_scale:
             return
-        new_scale = dlg.scale_factor
-        if new_scale == self._vib_scale:
-            return
-        ratio = new_scale / self._vib_scale
+        old_scale = self._vib_scale if self._vib_scale > 0 else 1.0
+        ratio = new_scale / old_scale
         self._vib_scale = new_scale
-        self._runtime_config["vibration_scale"] = new_scale
-        save_runtime_config(self._runtime_config)
         for side in SIDES:
             for ch in VIBRATION_CHANNELS:
                 chart = self._charts[side][ch]
                 if chart._values:
-                    chart._values = [v * ratio for v in chart._values]
+                    chart._values = [value * ratio for value in chart._values]
                     chart._update_plot()
-        for side in SIDES:
-            for ch in VIBRATION_CHANNELS:
                 self._spectrum_charts[side][ch].clear()
 
     def _on_system_settings(self):
-        dlg = SystemSettingsDialog(self)
+        dlg = SystemSettingsDialog(self, self._runtime_config)
         if dlg.exec_() == dlg.Accepted:
             self._runtime_config = dlg.values
+            self._apply_visual_settings(self._runtime_config)
 
     def _clear_side(self, side: str):
         for ch in ALL_CHANNELS:
