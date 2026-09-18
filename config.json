@@ -1,0 +1,26 @@
+{
+  "ws_url": "ws://127.0.0.1:8081",
+  "reconnect_interval": 3.0,
+  "max_points": 400000,
+  "fft_window_size": 1024,
+  "sample_rate": 4800,
+  "chart_refresh_interval": 50,
+  "vibration_channels": [
+    "x",
+    "y",
+    "z"
+  ],
+  "y_axis_auto": true,
+  "y_axis_min": -1.0,
+  "y_axis_max": 1.0,
+  "vibration_scale": 1.0,
+  "backend_host": "0.0.0.0",
+  "backend_port": 8081,
+  "plc_ip": "192.168.3.124",
+  "plc_port": 1025,
+  "log_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\logs",
+  "data_save_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\logs\\saved_data",
+  "new_data_save_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\data",
+  "model_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\logs\\models",
+  "enable_new_save": true
+}
