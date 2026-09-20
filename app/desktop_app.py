@@ -26,6 +26,17 @@ def _install_module_aliases(package, names):
 
 
 def main():
+    if "--apply-update" in sys.argv:
+        from app.update_manager import apply_update
+
+        try:
+            installer_index = sys.argv.index("--installer")
+            installer = sys.argv[installer_index + 1]
+            pid = int(sys.argv[sys.argv.index("--pid") + 1]) if "--pid" in sys.argv else 0
+            return apply_update(installer, pid=pid, restart=True)
+        except (ValueError, IndexError) as exc:
+            raise SystemExit(f"更新参数无效: {exc}")
+
     configure_logging()
     if "--ni-self-test" in sys.argv:
         prepare_nidaqmx_runtime()

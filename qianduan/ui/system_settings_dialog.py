@@ -29,6 +29,8 @@ from PyQt5.QtWidgets import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app_config import ensure_directories, load, save
+from app.version import APP_VERSION
+from qianduan.ui.update_dialog import UpdateDialog
 
 
 class SystemSettingsDialog(QDialog):
@@ -125,6 +127,7 @@ class SystemSettingsDialog(QDialog):
         tabs.addTab(self._build_connection_tab(), "通信设置")
         tabs.addTab(self._build_storage_tab(), "存储设置")
         tabs.addTab(self._build_display_tab(), "显示设置")
+        tabs.addTab(self._build_update_tab(), "软件更新")
         layout.addWidget(tabs, 1)
 
         restart_hint = QLabel("保存后，通信地址、端口及后端存储路径将在下次启动时生效；显示设置立即生效。")
@@ -180,7 +183,10 @@ class SystemSettingsDialog(QDialog):
         self._path_row(form, "log_dir", "日志保存路径")
         self._path_row(form, "data_save_dir", "训练数据路径")
         self._path_row(form, "new_data_save_dir", "新格式数据路径")
-        self._path_row(form, "model_dir", "模型保存路径")
+        model_path = QLineEdit(str(self._values["model_dir"]))
+        model_path.setReadOnly(True)
+        model_path.setToolTip("模型目录由软件固定管理，不能在界面中修改。")
+        form.addRow(self._field_label("模型目录（固定）"), model_path)
         self._enable_new = QCheckBox("保存 CSV、振动图、音频等新格式数据")
         self._enable_new.setChecked(bool(self._values["enable_new_save"]))
         form.addRow(self._field_label("新格式数据"), self._enable_new)
@@ -192,6 +198,27 @@ class SystemSettingsDialog(QDialog):
         layout.addWidget(hint)
         layout.addStretch(1)
         return page
+
+    def _build_update_tab(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(16, 8, 16, 16)
+        title = QLabel(f"当前版本：{APP_VERSION}")
+        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #263746;")
+        layout.addWidget(title)
+        hint = QLabel("更新会下载完整安装包及其分卷，校验后由安装程序完成升级。配置、日志、数据和模型文件会保留。")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        check = QPushButton("打开更新检查")
+        check.clicked.connect(self._open_update_dialog)
+        layout.addWidget(check)
+        layout.addStretch(1)
+        return page
+
+    def _open_update_dialog(self):
+        dialog = UpdateDialog(self)
+        dialog.exec_()
 
     def _build_display_tab(self):
         page = QWidget()
@@ -245,7 +272,6 @@ class SystemSettingsDialog(QDialog):
             "log_dir": self._log_dir.text().strip(),
             "data_save_dir": self._data_save_dir.text().strip(),
             "new_data_save_dir": self._new_data_save_dir.text().strip(),
-            "model_dir": self._model_dir.text().strip(),
         }
         if not ws_url or not (ws_url.startswith("ws://") or ws_url.startswith("wss://")):
             QMessageBox.warning(self, "设置无效", "请输入有效的 WebSocket 地址（ws:// 或 wss://）。")
@@ -254,7 +280,7 @@ class SystemSettingsDialog(QDialog):
             QMessageBox.warning(self, "设置无效", "PLC 地址不能为空。")
             return
         if any(not value for value in paths.values()):
-            QMessageBox.warning(self, "设置无效", "所有文件保存路径都不能为空。")
+            QMessageBox.warning(self, "设置无效", "日志和数据保存路径不能为空。")
             return
 
         y_min, y_max = self._y_min.value(), self._y_max.value()

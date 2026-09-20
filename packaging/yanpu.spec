@@ -12,7 +12,9 @@ a = Analysis(
     pathex=[".."],
     binaries=[],
     datas=[
-        ("../websocket_backend/logs/models", "websocket_backend/logs/models"),
+        # Keep the trained models beside the installed executable.  They are
+        # loaded from <install>\\logs\\models at runtime.
+        ("../logs/models", "logs/models"),
         ("../qianduan/yanpu_logo.png", "qianduan"),
     ] + copy_metadata("nidaqmx"),
     hiddenimports=hiddenimports,

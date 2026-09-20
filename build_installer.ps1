@@ -25,6 +25,14 @@ if (-not $SkipAppBuild) {
     }
 }
 
+$modelSource = Join-Path $repoRoot "logs\models"
+$modelTarget = Join-Path $repoRoot "dist\ELO-NVH\logs\models"
+if (-not (Test-Path -LiteralPath $modelSource)) {
+    throw "未找到模型目录: $modelSource"
+}
+New-Item -ItemType Directory -Force -Path $modelTarget | Out-Null
+Copy-Item -Path (Join-Path $modelSource "*.pth") -Destination $modelTarget -Force
+
 $appExe = Join-Path $repoRoot "dist\ELO-NVH\ELO-NVH.exe"
 if (-not (Test-Path -LiteralPath $appExe)) {
     throw "未找到 $appExe。请先完成应用程序构建。"

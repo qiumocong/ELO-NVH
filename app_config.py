@@ -9,6 +9,7 @@ import json
 import logging
 import logging.handlers
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -43,9 +44,40 @@ DEFAULTS: Dict[str, Any] = {
     "log_dir": str(USER_ROOT / "logs"),
     "data_save_dir": str(USER_ROOT / "logs" / "saved_data"),
     "new_data_save_dir": str(USER_ROOT / "data"),
+    # Model files are application assets/data and are intentionally not user-editable.
     "model_dir": str(USER_ROOT / "logs" / "models"),
     "enable_new_save": True,
 }
+
+
+def canonical_model_dir() -> Path:
+    """Return the only supported model directory for this installation."""
+    return USER_ROOT / "logs" / "models"
+
+
+def _migrate_bundled_models(target: Path) -> None:
+    """Copy models from legacy/source locations without overwriting operators' files."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(getattr(sys, "_MEIPASS", ""))
+        candidates.extend([bundle_root / "logs" / "models", bundle_root / "websocket_backend" / "logs" / "models"])
+    candidates.extend(
+        [
+            PROJECT_ROOT / "websocket_backend" / "logs" / "models",
+            USER_ROOT / "websocket_backend" / "logs" / "models",
+        ]
+    )
+    target.mkdir(parents=True, exist_ok=True)
+    for source in candidates:
+        if not source.is_dir() or source.resolve() == target.resolve():
+            continue
+        for item in source.glob("*.pth"):
+            destination = target / item.name
+            if not destination.exists():
+                try:
+                    shutil.copy2(item, destination)
+                except OSError:
+                    logging.getLogger(__name__).warning("迁移模型失败: %s", item, exc_info=True)
 
 
 def config_path() -> Path:
@@ -62,12 +94,16 @@ def load() -> Dict[str, Any]:
                 values.update({k: v for k, v in loaded.items() if k in DEFAULTS})
     except (OSError, ValueError) as exc:
         logging.getLogger(__name__).warning("读取配置失败 %s: %s", path, exc)
+    # Ignore any historical/user-supplied model_dir value.  This keeps model
+    # loading and training on the installation's logs/models directory.
+    values["model_dir"] = str(canonical_model_dir())
     return values
 
 
 def save(values: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(DEFAULTS)
     merged.update({k: v for k, v in values.items() if k in DEFAULTS})
+    merged["model_dir"] = str(canonical_model_dir())
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
@@ -78,8 +114,10 @@ def save(values: Dict[str, Any]) -> Dict[str, Any]:
 
 def ensure_directories(values: Optional[Dict[str, Any]] = None) -> None:
     values = values or load()
+    values["model_dir"] = str(canonical_model_dir())
     for key in ("log_dir", "data_save_dir", "new_data_save_dir", "model_dir"):
         Path(str(values[key])).expanduser().mkdir(parents=True, exist_ok=True)
+    _migrate_bundled_models(canonical_model_dir())
 
 
 def configure_logging(values: Optional[Dict[str, Any]] = None) -> None:
