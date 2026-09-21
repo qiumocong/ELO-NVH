@@ -17,3 +17,5 @@ qianduan/csv_data_source.py
 .venv
 
 
+/.venv-release/
+/qianduan/.idea/

@@ -1,6 +1,7 @@
 param(
-    [string]$Version = "0.1.0",
-    [switch]$SkipAppBuild
+    [string]$Version = "0.1.1",
+    [switch]$SkipAppBuild,
+    [string]$PythonPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
 
-$python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$python = if ($PythonPath) { (Resolve-Path -LiteralPath $PythonPath).Path } else { Join-Path $repoRoot ".venv\Scripts\python.exe" }
 if (-not (Test-Path -LiteralPath $python)) {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if (-not $pythonCommand) {
@@ -56,8 +57,8 @@ if ($LASTEXITCODE -ne 0) {
 
 $installer = Join-Path $repoRoot "dist\installer\ELO-NVH-Setup-$Version.exe"
 if (Test-Path -LiteralPath $installer) {
-    $sizeGB = [math]::Round((Get-Item -LiteralPath $installer).Length / 1GB, 2)
-    Write-Host "安装程序已生成: $installer ($sizeGB GB)"
+    $sizeMB = [math]::Round((Get-Item -LiteralPath $installer).Length / 1MB, 2)
+    Write-Host "安装程序已生成: $installer ($sizeMB MB；如生成 .bin 分卷，请与主程序一并发布)"
 } else {
     throw "Inno Setup 未生成预期文件: $installer"
 }

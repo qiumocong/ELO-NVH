@@ -1,8 +1,12 @@
+param(
+    [string]$PythonPath = ""
+)
+
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
 
-$python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$python = if ($PythonPath) { (Resolve-Path -LiteralPath $PythonPath).Path } else { Join-Path $repoRoot ".venv\Scripts\python.exe" }
 if (-not (Test-Path -LiteralPath $python)) {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if (-not $pythonCommand) {
