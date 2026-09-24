@@ -23,12 +23,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist\installer
 OutputBaseFilename=ELO-NVH-Setup-{#MyAppVersion}
 SetupIconFile=..\qianduan\elo_nvh.ico
-; Keep each generated installer payload below GitHub's 2 GB per-file limit.
-; Distribute the .exe together with every generated .bin slice.
-DiskSpanning=yes
-DiskSliceSize=1900000000
-SlicesPerDisk=1
-Compression=lzma2/fast
+; The CPU-only lightweight build is below GitHub's 2 GB per-file limit, so
+; keep the complete installer in one executable without .bin split files.
+Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
 WizardStyle=modern

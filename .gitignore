@@ -2,10 +2,13 @@
 __pycache__/
 *.py[oc]
 build/
+data/
 dist/
 wheels/
 *.egg-info
 websocket_backend/logs/
+
+.idea
 
 qianduan/view_data.py
 qianduan/csv_data_source.py
@@ -14,3 +17,5 @@ qianduan/csv_data_source.py
 .venv
 
 
+/.venv-release/
+/qianduan/.idea/

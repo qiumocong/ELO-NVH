@@ -1,6 +1,6 @@
 [project]
 name = "yanpu"
-version = "0.1.0"
+version = "0.1.1"
 description = "Vibration noise detection with PLC trigger, backend API and desktop frontend."
 readme = "README.md"
 requires-python = ">=3.8"
