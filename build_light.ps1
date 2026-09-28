@@ -8,17 +8,19 @@ Set-Location $repoRoot
 
 $python = Join-Path $repoRoot ".venv-release\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) {
-    throw "未找到 CPU 发布环境 $python。请先按 README 的轻量发布版步骤创建 .venv-release。"
+    throw "Release Python environment not found: $python. Create .venv-release first."
 }
 
-& (Join-Path $repoRoot "build_windows.ps1") -PythonPath $python
+$buildWindows = Join-Path $repoRoot "build_windows.ps1"
+& $buildWindows -PythonPath $python
 if ($LASTEXITCODE -ne 0) {
-    throw "轻量版 exe 构建失败，退出码 $LASTEXITCODE。"
+    throw "build_windows.ps1 failed with exit code $LASTEXITCODE"
 }
 
-& (Join-Path $repoRoot "build_installer.ps1") -Version $Version -PythonPath $python -SkipAppBuild
+$buildInstaller = Join-Path $repoRoot "build_installer.ps1"
+& $buildInstaller -Version $Version -PythonPath $python -SkipAppBuild
 if ($LASTEXITCODE -ne 0) {
-    throw "轻量版安装包构建失败，退出码 $LASTEXITCODE。"
+    throw "build_installer.ps1 failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "轻量版发布完成: dist\installer\ELO-NVH-Setup-$Version.exe"
+Write-Host "Light build completed: dist\installer\ELO-NVH-Setup-$Version.exe"
