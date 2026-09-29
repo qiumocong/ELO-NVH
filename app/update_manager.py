@@ -9,17 +9,55 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import json
+import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from app.version import APP_VERSION, UPDATE_API_URL
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _update_log_path() -> Path:
+    """Return a writable log path even when the update process runs alone."""
+    if getattr(sys, "frozen", False):
+        candidates = [Path(sys.executable).resolve().parent / "logs" / "update.log"]
+    else:
+        candidates = [Path(__file__).resolve().parents[1] / "logs" / "update.log"]
+    candidates.append(Path(tempfile.gettempdir()) / "ELO-NVH-update.log")
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            with candidate.open("a", encoding="utf-8"):
+                pass
+            return candidate
+        except OSError:
+            continue
+    return candidates[-1]
+
+
+def _update_log(message: str, *, error: Optional[BaseException] = None) -> None:
+    """Write update diagnostics before the normal application logger starts."""
+    line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
+    if error is not None:
+        line += f" ({type(error).__name__}: {error})"
+    try:
+        path = _update_log_path()
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+    _LOGGER.info(line)
 
 
 @dataclass
@@ -88,6 +126,7 @@ def download_release(
     release: ReleaseInfo,
     progress: Optional[Callable[[int], None]] = None,
     status: Optional[Callable[[str], None]] = None,
+    progress_detail: Optional[Callable[[int, int], None]] = None,
 ) -> Path:
     target = Path(tempfile.mkdtemp(prefix=f"ELO-NVH-update-{release.version}-"))
     total = sum(max(0, int(item.get("size", 0))) for item in release.assets)
@@ -107,6 +146,8 @@ def download_release(
                     completed += len(block)
                     if progress and total:
                         progress(min(99, int(completed * 100 / total)))
+                    if progress_detail:
+                        progress_detail(completed, total)
             expected = str(item.get("digest") or "")
             if expected.startswith("sha256:") and _sha256(destination) != expected.split(":", 1)[1].lower():
                 raise RuntimeError(f"文件校验失败：{item['name']}")
@@ -145,30 +186,147 @@ def apply_update(installer: str, pid: int = 0, restart: bool = True) -> int:
     installer_path = Path(installer).resolve()
     if not installer_path.is_file():
         raise FileNotFoundError(installer_path)
-    if pid:
-        _wait_for_process(pid)
-    subprocess.run(
-        [str(installer_path), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-        cwd=str(installer_path.parent),
-        check=True,
+    frozen = bool(getattr(sys, "frozen", False))
+    app_executable = Path(sys.executable).resolve()
+    app_dir = app_executable.parent
+    _update_log(
+        f"开始应用更新: installer={installer_path}; pid={pid}; "
+        f"current_executable={app_executable}; frozen={frozen}"
     )
+    if pid:
+        _update_log(f"等待旧进程退出: pid={pid}")
+        _wait_for_process(pid)
+        _update_log(f"旧进程等待结束: pid={pid}")
+
+    # Installing into the directory from which the update was launched avoids
+    # updating the default install directory while restarting an older portable
+    # copy from dist\ELO-NVH.  /DIR is supported by Inno Setup and is harmless
+    # for the normal per-user installation path.
+    command = [
+        str(installer_path),
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+    ]
+    if frozen:
+        command.append(f"/DIR={app_dir}")
+    _update_log(f"启动安装程序: {' '.join(command)}")
+    try:
+        result = subprocess.run(command, cwd=str(installer_path.parent), check=False)
+    except Exception as exc:
+        _update_log("启动安装程序失败", error=exc)
+        raise
+    _update_log(f"安装程序已退出: returncode={result.returncode}")
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, command)
+
     if restart:
-        if getattr(sys, "frozen", False):
-            command = [sys.executable]
-            cwd = str(Path(sys.executable).resolve().parent)
+        if frozen:
+            restart_executable = app_dir / app_executable.name
+            command = [str(restart_executable)]
+            cwd = str(app_dir)
         else:
             app_script = Path(__file__).resolve().parent / "desktop_app.py"
             command = [sys.executable, str(app_script)]
             cwd = str(app_script.parent.parent)
-        subprocess.Popen(command, cwd=cwd)
+        _update_log(f"重启程序: {' '.join(command)}; cwd={cwd}")
+        try:
+            subprocess.Popen(command, cwd=cwd)
+        except Exception as exc:
+            _update_log("重启程序失败", error=exc)
+            raise
     return 0
 
 
 def launch_update(installer: Path) -> None:
-    """Start the updater and return; the caller should close the Qt app."""
+    """Start an updater that does not keep the application exe locked.
+
+    A frozen PyInstaller executable cannot safely update itself while it is
+    still the process running the installer.  On Windows we therefore use the
+    built-in PowerShell host as a tiny detached helper.  The old self-updater
+    remains the fallback for source runs and unusual systems without
+    ``powershell.exe``.
+    """
+    installer = Path(installer).resolve()
+    app_executable = Path(sys.executable).resolve()
+    cwd = app_executable.parent
+    pid = os.getpid()
+
+    if getattr(sys, "frozen", False) and os.name == "nt":
+        def ps_quote(value: object) -> str:
+            return "'" + str(value).replace("'", "''") + "'"
+
+        log_path = cwd / "logs" / "update.log"
+        # The script is deliberately self-contained: it can continue after
+        # the Qt process exits and does not import or lock ELO-NVH.exe.
+        script = f"""
+$ErrorActionPreference = 'Stop'
+$oldPid = {pid}
+$installerPath = {ps_quote(installer)}
+$appPath = {ps_quote(app_executable)}
+$appDir = {ps_quote(cwd)}
+$logPath = {ps_quote(log_path)}
+$fallbackLogPath = Join-Path $env:TEMP 'ELO-NVH-update.log'
+function Write-UpdateLog([string]$Message) {{
+    $line = (Get-Date -Format 's') + ' ' + $Message
+    foreach ($candidate in @($logPath, $fallbackLogPath)) {{
+        try {{
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $candidate) | Out-Null
+            Add-Content -LiteralPath $candidate -Value $line -Encoding UTF8
+            return
+        }} catch {{ }}
+    }}
+}}
+try {{
+    Write-UpdateLog "PowerShell 更新辅助进程启动: pid=$oldPid installer=$installerPath"
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $deadline -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {{
+        Start-Sleep -Milliseconds 250
+    }}
+    if (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {{
+        throw "主程序在 60 秒内未退出 (pid=$oldPid)"
+    }}
+    $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ('/DIR=' + $appDir))
+    $installerProcess = Start-Process -FilePath $installerPath -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $installerPath) -Wait -PassThru
+    Write-UpdateLog "安装程序退出: code=$($installerProcess.ExitCode)"
+    if ($installerProcess.ExitCode -ne 0) {{
+        throw "安装程序返回错误码 $($installerProcess.ExitCode)"
+    }}
+    Start-Process -FilePath $appPath -WorkingDirectory $appDir
+    Write-UpdateLog "已重启程序: $appPath"
+}} catch {{
+    Write-UpdateLog ("更新失败: " + $_.Exception.Message)
+    try {{
+        Start-Process -FilePath $appPath -WorkingDirectory $appDir
+        Write-UpdateLog "更新失败后已恢复启动旧版本"
+    }} catch {{ }}
+    exit 1
+}}
+"""
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if powershell:
+            command = [
+                powershell,
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                script,
+            ]
+            _update_log(f"启动独立更新辅助进程: installer={installer}; app={app_executable}; pid={pid}")
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.Popen(command, cwd=str(cwd), creationflags=creationflags)
+            return
+        _update_log("未找到 powershell.exe，回退到兼容更新进程")
+
     if getattr(sys, "frozen", False):
         command = [sys.executable]
     else:
         command = [sys.executable, str(Path(__file__).resolve().parent / "desktop_app.py")]
-    command.extend(["--apply-update", "--installer", str(installer), "--pid", str(os.getpid())])
-    subprocess.Popen(command, cwd=str(Path(sys.executable).resolve().parent))
+    command.extend(["--apply-update", "--installer", str(installer), "--pid", str(pid)])
+    _update_log(f"启动兼容更新进程: {' '.join(command)}; cwd={cwd}")
+    subprocess.Popen(command, cwd=str(cwd))

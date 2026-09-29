@@ -27,7 +27,7 @@ def _install_module_aliases(package, names):
 
 def main():
     if "--apply-update" in sys.argv:
-        from app.update_manager import apply_update
+        from app.update_manager import _update_log, apply_update
 
         try:
             installer_index = sys.argv.index("--installer")
@@ -35,7 +35,11 @@ def main():
             pid = int(sys.argv[sys.argv.index("--pid") + 1]) if "--pid" in sys.argv else 0
             return apply_update(installer, pid=pid, restart=True)
         except (ValueError, IndexError) as exc:
+            _update_log("更新参数无效", error=exc)
             raise SystemExit(f"更新参数无效: {exc}")
+        except Exception as exc:
+            _update_log("更新执行失败", error=exc)
+            raise SystemExit(f"更新执行失败，请查看 logs\\update.log: {exc}")
 
     configure_logging()
     if "--ni-self-test" in sys.argv:

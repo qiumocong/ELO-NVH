@@ -33,6 +33,7 @@ class _CheckWorker(QThread):
 
 class _DownloadWorker(QThread):
     progress = pyqtSignal(int)
+    progress_detail = pyqtSignal(int, int)
     status = pyqtSignal(str)
     succeeded = pyqtSignal(object)
     failed = pyqtSignal(str)
@@ -43,7 +44,12 @@ class _DownloadWorker(QThread):
 
     def run(self):
         try:
-            installer = download_release(self.release, self.progress.emit, self.status.emit)
+            installer = download_release(
+                self.release,
+                self.progress.emit,
+                self.status.emit,
+                self.progress_detail.emit,
+            )
             self.succeeded.emit(installer)
         except Exception as exc:
             logging.getLogger(__name__).exception("下载更新失败")
@@ -57,6 +63,7 @@ class UpdateDialog(QDialog):
         self.setMinimumWidth(560)
         self._release = None
         self._worker = None
+        self._last_download_status = ""
         self._build()
 
     def _build(self):
@@ -68,10 +75,16 @@ class UpdateDialog(QDialog):
         self._notes.setWordWrap(True)
         self._status = QLabel("点击“检查更新”获取最新版本信息。")
         self._status.setWordWrap(True)
+        self._phase = QLabel("阶段：未开始")
+        self._phase.setStyleSheet("font-weight: 600; color: #36566f;")
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
+        self._progress.setFormat("%p%")
         self._progress.setVisible(False)
+        self._progress_detail = QLabel("")
+        self._progress_detail.setStyleSheet("color: #687782;")
+        self._progress_detail.setVisible(False)
         self._check = QPushButton("检查更新")
         self._install = QPushButton("下载并安装")
         self._install.setEnabled(False)
@@ -83,7 +96,9 @@ class UpdateDialog(QDialog):
         layout.addWidget(self._latest)
         layout.addWidget(self._notes)
         layout.addWidget(self._status)
+        layout.addWidget(self._phase)
         layout.addWidget(self._progress)
+        layout.addWidget(self._progress_detail)
         layout.addWidget(self._check)
         layout.addWidget(self._install)
         layout.addWidget(buttons)
@@ -91,6 +106,8 @@ class UpdateDialog(QDialog):
     def check(self):
         self._check.setEnabled(False)
         self._install.setEnabled(False)
+        self._phase.setText("阶段 1/3：检查更新")
+        self._show_progress(indeterminate=True, detail="正在连接 GitHub Release...")
         self._status.setText("正在检查 GitHub Release...")
         self._worker = _CheckWorker(self)
         self._worker.succeeded.connect(self._check_succeeded)
@@ -104,9 +121,13 @@ class UpdateDialog(QDialog):
         self._latest.setText(f"最新版本：{release.version}")
         self._notes.setText(f"更新说明：\n{release.notes}")
         if is_newer(release.version):
+            self._phase.setText("阶段 2/3：等待下载")
+            self._show_progress(value=0, detail="已找到安装包，等待开始下载。")
             self._status.setText("发现新版本，可以下载并安装。")
             self._install.setEnabled(True)
         else:
+            self._phase.setText("检查完成")
+            self._show_progress(value=100, detail="当前版本无需更新。")
             self._status.setText(f"当前已是最新版本（{APP_NAME} {APP_VERSION}）。")
 
     def download(self):
@@ -114,17 +135,21 @@ class UpdateDialog(QDialog):
             return
         self._check.setEnabled(False)
         self._install.setEnabled(False)
-        self._progress.setVisible(True)
+        self._phase.setText("阶段 2/3：下载并校验")
+        self._show_progress(value=0, detail="准备下载安装包...")
         self._status.setText("准备下载...")
         self._worker = _DownloadWorker(self._release, self)
         self._worker.progress.connect(self._progress.setValue)
-        self._worker.status.connect(self._status.setText)
+        self._worker.progress_detail.connect(self._download_progress_detail)
+        self._worker.status.connect(self._download_status)
         self._worker.succeeded.connect(self._download_succeeded)
         self._worker.failed.connect(self._failed)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _download_succeeded(self, installer):
+        self._phase.setText("阶段 3/3：启动安装并重启")
+        self._show_progress(indeterminate=True, detail="下载和校验完成，正在启动安装程序...")
         self._status.setText("下载完成，正在启动安装程序。")
         launch_update(Path(installer))
         QMessageBox.information(self, "准备更新", "软件将关闭并安装新版本，安装完成后会自动重新启动。")
@@ -139,6 +164,43 @@ class UpdateDialog(QDialog):
 
     def _failed(self, message):
         self._check.setEnabled(True)
+        self._phase.setText("更新失败")
         self._progress.setVisible(False)
+        self._progress_detail.setVisible(False)
         self._status.setText("更新失败，请检查网络或稍后重试。")
         QMessageBox.warning(self, "更新失败", message)
+
+    def _show_progress(self, *, value=None, indeterminate=False, detail=""):
+        self._progress.setVisible(True)
+        self._progress_detail.setVisible(True)
+        if indeterminate:
+            self._progress.setRange(0, 0)
+            self._progress.setFormat("处理中…")
+        else:
+            self._progress.setRange(0, 100)
+            self._progress.setValue(max(0, min(100, int(value or 0))))
+            self._progress.setFormat("%p%")
+        if detail:
+            self._progress_detail.setText(detail)
+
+    def _download_progress_detail(self, completed, total):
+        def format_size(value):
+            units = ("B", "KB", "MB", "GB")
+            amount = float(max(0, value))
+            for unit in units:
+                if amount < 1024 or unit == units[-1]:
+                    return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
+                amount /= 1024
+
+        if total > 0:
+            self._progress_detail.setText(
+                f"{self._last_download_status}  已下载 {format_size(completed)} / {format_size(total)}"
+            )
+        else:
+            self._progress_detail.setText(
+                f"{self._last_download_status}  已下载 {format_size(completed)}"
+            )
+
+    def _download_status(self, message):
+        self._last_download_status = str(message)
+        self._status.setText(self._last_download_status)

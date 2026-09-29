@@ -54,10 +54,10 @@ uv pip install --python .venv-release\Scripts\python.exe "pyinstaller>=6.20.0" "
 然后使用发布环境构建：
 
 ```powershell
-.\build_windows.ps1 -PythonPath .\.venv-release\Scripts\python.exe
-.\build_installer.ps1 -Version 0.1.1 -PythonPath .\.venv-release\Scripts\python.exe -SkipAppBuild
-# 后续发布可直接使用：
-.\build_light.ps1 -Version 0.1.1
+.\build_windows.ps1 -PythonPath .\.venv-release\Scripts\python.exe -Version 0.1.3
+.\build_installer.ps1 -Version 0.1.3 -PythonPath .\.venv-release\Scripts\python.exe -SkipAppBuild
+# 后续发布可直接使用；-Version 会同步程序内部版本和安装器版本：
+.\build_light.ps1 -Version 0.1.3
 ```
 
 轻量版仍使用 CPU 推理，功能和模型不变；原 `.venv` CUDA 环境继续用于训练，不参与发布包。
@@ -70,7 +70,7 @@ uv pip install --python .venv-release\Scripts\python.exe "pyinstaller>=6.20.0" "
 .\build_installer.ps1
 ```
 
-脚本会先重新构建 PyInstaller 应用，再生成 `dist\installer\ELO-NVH-Setup-0.1.1.exe`。指定版本号并跳过应用重构建的示例：
+脚本会先重新构建 PyInstaller 应用，再生成 `dist\installer\ELO-NVH-Setup-0.1.3.exe`。指定版本号并跳过应用重构建的示例：
 
 ```powershell
 .\build_installer.ps1 -Version 1.0.0
@@ -82,7 +82,7 @@ uv pip install --python .venv-release\Scripts\python.exe "pyinstaller>=6.20.0" "
 可使用以下命令生成校验值，并将输出粘贴到 Release 说明中：
 
 ```powershell
-Get-FileHash .\dist\installer\ELO-NVH-Setup-0.1.1* -Algorithm SHA256
+Get-FileHash .\dist\installer\ELO-NVH-Setup-0.1.3* -Algorithm SHA256
 ```
 
 安装器默认安装到 `%LOCALAPPDATA%\Programs\ELO-NVH`，无需管理员权限；也可以在安装向导中选择其他目录。安装后从开始菜单或桌面快捷方式启动。卸载程序不会删除 `config.json`、`logs`、`data` 和模型文件，便于保留生产记录和升级恢复。
@@ -105,4 +105,6 @@ Get-FileHash .\dist\installer\ELO-NVH-Setup-0.1.1* -Algorithm SHA256
 
 在“系统设置 → 软件更新”中点击“打开更新检查”。程序会查询项目 GitHub Release，下载当前版本对应的安装包以及可能存在的 `.bin` 分卷，下载完成后校验并启动安装程序。安装升级不会删除 `config.json`、日志、采集数据或 `logs\\models` 中的模型。发布新版本时，Release 至少上传安装包 `.exe`；若存在分卷，则需将全部分卷一起上传，并保持原始文件名。
 
-发布新版本前，将 `app/version.py` 中的 `APP_VERSION` 和 `pyproject.toml` 版本改为同一个版本号，再执行 `.\build_installer.ps1 -Version 1.0.1`，最后创建同名的 GitHub Release 标签（例如 `v1.0.1`）。
+发布新版本时执行 `.\build_light.ps1 -Version 0.1.3`；脚本会先同步 `app/version.py` 和 `pyproject.toml`，再构建 PyInstaller 和 Inno Setup 安装包，避免安装器文件名与软件界面版本不一致。随后创建同名的 GitHub Release 标签（例如 `v0.1.3`），并上传 `dist/installer/ELO-NVH-Setup-0.1.3.exe`。
+
+更新过程由独立更新进程完成：安装包先下载到 `%TEMP%\ELO-NVH-update-*`，主程序退出后，更新进程等待旧进程结束，使用静默参数运行安装器并安装到当前程序目录，最后重新启动同一目录下的 `ELO-NVH.exe`。更新诊断写入安装目录 `logs\update.log`；如果安装目录不可写，则写入 `%TEMP%\ELO-NVH-update.log`。旧版本的 v0.1.2 安装包曾只更新了安装器版本号，内部版本仍为 0.1.1，应使用修复后的新版本发布。

@@ -1,8 +1,8 @@
 ; ELO-NVH desktop application installer
-; Build with: ISCC.exe /DMyAppVersion=0.1.0 packaging\yanpu.iss
+; Build with: ISCC.exe /DMyAppVersion=0.1.3 packaging\yanpu.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.0"
+  #define MyAppVersion "0.1.3"
 #endif
 
 #define MyAppName "ELO-NVH 振动质检系统"
