@@ -34,6 +34,10 @@ class TimeChart(QWidget):
         self._times = []      # list, 支持 O(1) 索引和切片
         self._values = []
         self._maxlen = MAX_POINTS if MAX_POINTS > 0 else None
+        # 原始极值独立保存，不受显示缩放、降采样和历史曲线裁剪影响。
+        self._track_extrema = self._resolve()[0] in ("x", "y", "z")
+        self._raw_min = None
+        self._raw_max = None
         self._setup_ui()
 
     def _resolve(self):
@@ -54,22 +58,37 @@ class TimeChart(QWidget):
         label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         layout.addWidget(label)
 
+        if self._track_extrema:
+            self._extrema_label = QLabel()
+            self._extrema_label.setStyleSheet("font-size: 12px; color: #555;")
+            self._extrema_label.setWordWrap(True)
+            self._extrema_label.setToolTip(
+                "统计本轮前端收到的原始加速度，保留正负号；不受显示缩放影响。"
+                "采集结束后保留，清空本工位曲线时重置。"
+            )
+            self._update_extrema_label()
+            layout.addWidget(self._extrema_label)
+
         self._plot_widget = pg.PlotWidget()
         self._plot_widget.setBackground("w")
         self._plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self._plot_widget.setLabel("bottom", "时间", units="s")
+        axis_label_style = {"color": "#000000", "font-size": "10pt"}
+        self._plot_widget.setLabel("bottom", "时间", units="s", **axis_label_style)
         y_label = self.LABELS.get(base, base)
-        self._plot_widget.setLabel("left", y_label, units=self.UNITS.get(base, ""))
+        self._plot_widget.setLabel("left", y_label, units=self.UNITS.get(base, ""), **axis_label_style)
         self._plot_widget.setMinimumHeight(100)
 
         axis_font = pg.QtGui.QFont()
-        axis_font.setPointSize(8)
+        axis_font.setPointSize(10)
         for ax_name in ('left', 'bottom'):
             axis = self._plot_widget.getAxis(ax_name)
+            # 白底上明确使用黑色轴线、刻度和数字，避免默认灰色可读性不足。
+            axis.setPen(pg.mkPen("#000000", width=1))
+            axis.setTickPen(pg.mkPen("#000000", width=1))
+            axis.setTextPen(pg.mkPen("#000000"))
             axis.setStyle(tickFont=axis_font)
             axis.enableAutoSIPrefix(False)
-            lf = pg.QtGui.QFont(); lf.setPointSize(8)
-            axis.label.setFont(lf)
+            axis.label.setFont(axis_font)
 
         color = self.COLORS.get(base, "#333")
         pen = pg.mkPen(color=color, width=1.5)
@@ -79,7 +98,17 @@ class TimeChart(QWidget):
 
         layout.addWidget(self._plot_widget)
 
-    def add_data(self, times: list, values: list):
+    def add_data(self, times: list, values: list, raw_values=None):
+        """values 用于绘图；raw_values 是缩放前数据，省略时沿用 values。"""
+        if self._track_extrema:
+            # 先统计完整新增批次，再裁剪/降采样，避免漏掉早期或瞬时峰值。
+            raw = np.asarray(values if raw_values is None else raw_values, dtype=np.float64)
+            finite = raw[np.isfinite(raw)]
+            if finite.size:
+                batch_min, batch_max = float(finite.min()), float(finite.max())
+                self._raw_min = batch_min if self._raw_min is None else min(self._raw_min, batch_min)
+                self._raw_max = batch_max if self._raw_max is None else max(self._raw_max, batch_max)
+                self._update_extrema_label()
         self._times.extend(times)
         self._values.extend(values)
         if self._maxlen and len(self._times) > self._maxlen:
@@ -92,6 +121,21 @@ class TimeChart(QWidget):
         self._times.clear()
         self._values.clear()
         self._curve.setData([], [])
+        self._raw_min = None
+        self._raw_max = None
+        if self._track_extrema:
+            self._update_extrema_label()
+
+    def _update_extrema_label(self):
+        maximum = "——" if self._raw_max is None else f"{self._raw_max:.3f}"
+        minimum = "——" if self._raw_min is None else f"{self._raw_min:.3f}"
+        # 仅突出极值数字，说明文字沿用原字号，便于快速读取各轴峰值。
+        number_style = "font-size: 16px; font-weight: bold; color: #000000;"
+        self._extrema_label.setText(
+            "本轮原始极值（m/s²）<br>"
+            f'最大：<span style="{number_style}">{maximum}</span>&nbsp;&nbsp;'
+            f'最小：<span style="{number_style}">{minimum}</span>'
+        )
 
     def _update_plot(self):
         if not self._times:

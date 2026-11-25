@@ -330,10 +330,13 @@ class MainWindow(QMainWindow):
                 for ch in ALL_CHANNELS:
                     val = msg.get(f"{side}_{ch}")
                     if val is not None:
-                        self._charts[side][ch].add_data([t0], [val])
+                        # 单点和批量采用相同口径：曲线可缩放，极值始终统计原始值。
+                        display_val = val * self._vib_scale if ch in VIBRATION_CHANNELS else val
+                        self._charts[side][ch].add_data([t0], [display_val], raw_values=[val])
                         has = True
                 if has:
                     self._side_next_time[side] = t0 + 1.0 / 2400
+                    self._side_has_data[side] = True
         else:
             # --- 批量数据分支 ---
             for side in SIDES:
@@ -355,7 +358,8 @@ class MainWindow(QMainWindow):
                         local_times = [t0 + i * dt for i in range(n)]
                         if ch in VIBRATION_CHANNELS and self._vib_scale != 1.0:
                             scaled = [v * self._vib_scale for v in values]
-                            self._charts[side][ch].add_data(local_times, scaled)
+                            # 额外传入缩放前数据，仅用于本轮原始加速度极值统计。
+                            self._charts[side][ch].add_data(local_times, scaled, raw_values=values)
                         else:
                             self._charts[side][ch].add_data(local_times, values)
                         has = True

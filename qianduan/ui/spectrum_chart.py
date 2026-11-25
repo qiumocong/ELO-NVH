@@ -54,18 +54,22 @@ class SpectrumChart(QWidget):
         self._plot_widget = pg.PlotWidget()
         self._plot_widget.setBackground("w")
         self._plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self._plot_widget.setLabel("bottom", "时间", units="s")
-        self._plot_widget.setLabel("left", "频率", units="Hz")
+        axis_label_style = {"color": "#000000", "font-size": "10pt"}
+        self._plot_widget.setLabel("bottom", "时间", units="s", **axis_label_style)
+        self._plot_widget.setLabel("left", "频率", units="Hz", **axis_label_style)
         self._plot_widget.setMinimumHeight(120)
 
         axis_font = pg.QtGui.QFont()
-        axis_font.setPointSize(8)
+        axis_font.setPointSize(10)
         for ax_name in ('left', 'bottom'):
             axis = self._plot_widget.getAxis(ax_name)
+            # 与时域图统一，黑色轴线和较大刻度数字便于现场查看。
+            axis.setPen(pg.mkPen("#000000", width=1))
+            axis.setTickPen(pg.mkPen("#000000", width=1))
+            axis.setTextPen(pg.mkPen("#000000"))
             axis.setStyle(tickFont=axis_font)
             axis.enableAutoSIPrefix(False)
-            lf = pg.QtGui.QFont(); lf.setPointSize(8)
-            axis.label.setFont(lf)
+            axis.label.setFont(axis_font)
 
         self._image_item = pg.ImageItem()
         self._plot_widget.addItem(self._image_item)
