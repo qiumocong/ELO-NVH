@@ -155,6 +155,22 @@ class LabelerPanel(QWidget):
         self._ng_count = 0
         self._update_count()
 
+    def clear(self):
+        """新一轮检测重置待选标签和状态，累计标注数量保持不变。"""
+        self._pending_label = None
+        self._reset_to_select()
+        self._preview_label.clear()
+        self._status_label.setText("未标注")
+        self._status_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #888;")
+        self._status_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f5f5f5;
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                padding: 6px;
+            }
+        """)
+
     def _on_select(self, label: int):
         self._pending_label = label
         self._select_group.hide()

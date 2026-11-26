@@ -11,6 +11,7 @@ websocket_backend/logs/
 .idea
 
 qianduan/view_data.py
+qianduan/view_data2.py
 qianduan/csv_data_source.py
 
 # Virtual environments

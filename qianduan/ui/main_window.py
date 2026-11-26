@@ -17,9 +17,9 @@
 
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QFrame
+    QLabel, QFrame, QScrollArea
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
 from config import VIBRATION_CHANNELS
 from ui.status_bar import StatusBarWidget
@@ -27,10 +27,12 @@ from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.result_panel import ResultPanel
 from ui.system_settings_dialog import SystemSettingsDialog
+from ui.scale_status import ScaleStatusLabel
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app_config import load as load_runtime_config
+from qianduan.scale_controller import ScaleController
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -43,6 +45,9 @@ LOGO_PATH = str(Path(__file__).resolve().parent.parent / "yanpu_logo.png")
 
 class MainWindow(QMainWindow):
     """主窗口：双工位信息 + 双推理结果"""
+
+    # 仅在设置成功应用、且比例确实变化后发出，供后续保存比例同步使用。
+    vibration_scale_changed = pyqtSignal(float)
 
     def __init__(self):
         super().__init__()
@@ -58,14 +63,19 @@ class MainWindow(QMainWindow):
         self._side_has_data = {"left": False, "right": False}
         self._side_next_time = {"left": 0.0, "right": 0.0}
         self._vib_scale = 1.0
-        self._runtime_config = load_runtime_config()
-        self._vib_scale = float(self._runtime_config.get("vibration_scale", 1.0))
+        self._runtime_config = dict(load_runtime_config())
+        # 每次新启动均从 100% 开始；只覆盖本窗口内存，不改其他持久化设置。
+        self._runtime_config["vibration_scale"] = self._vib_scale
         # 按侧 batch 去重 & 诊断
         self._last_batch_id = {"left": -1, "right": -1}
         self._diag_rx_count = 0
         self._diag_rx_dup = 0
         self._diag_start_time = None
 
+        self._scale_controller = ScaleController(self)
+        self._scale_controller.round_changed.connect(self._on_scale_round)
+        self._scale_controller.legacy_clear_requested.connect(self._clear_side)
+        self.vibration_scale_changed.connect(self._scale_controller.change_scale)
         self._setup_ui()
         self._restore_visual_settings()
 
@@ -130,7 +140,7 @@ class MainWindow(QMainWindow):
 
         # ========== 左侧面板 ==========
         left_panel = QWidget()
-        left_panel.setFixedWidth(320)
+        left_panel.setMinimumWidth(290)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(12, 20, 12, 12)
@@ -139,11 +149,13 @@ class MainWindow(QMainWindow):
         # 工位信息：左 + 右
         self._info_frames = {}
         self._info_labels = {}
+        self._scale_labels = {}
         for side in SIDES:
             frame = QFrame()
+            frame.setObjectName("stationInfo")
             frame.setFrameShape(QFrame.StyledPanel)
             frame.setStyleSheet("""
-                QFrame {
+                QFrame#stationInfo {
                     background-color: #f0f4f8;
                     border: 1px solid #d0d8e0;
                     border-radius: 6px;
@@ -169,6 +181,9 @@ class MainWindow(QMainWindow):
             mode = QLabel("模式: ——")
             mode.setStyleSheet("font-size: 12px; color: #555;")
             fl.addWidget(mode)
+
+            self._scale_labels[side] = ScaleStatusLabel(self._scale_controller, side)
+            fl.addWidget(self._scale_labels[side])
 
             self._info_labels[side] = {"barcode": barcode, "spec": spec, "mode": mode}
             self._info_frames[side] = frame
@@ -199,15 +214,20 @@ class MainWindow(QMainWindow):
         self._system_settings_btn.clicked.connect(self._on_system_settings)
         left_layout.addWidget(self._system_settings_btn)
 
-        # 左检测结果
+        # 保留原版左右结果上下同时展示，不通过页签隐藏任何工位。
         self._result_panel_left = ResultPanel("左侧检测结果")
         left_layout.addWidget(self._result_panel_left, stretch=1)
-
-        # 右检测结果
         self._result_panel_right = ResultPanel("右侧检测结果")
         left_layout.addWidget(self._result_panel_right, stretch=1)
 
-        content_layout.addWidget(left_panel)
+        # 信息增加后允许侧栏滚动，小屏幕不压缩或遮住结果/设置控件。
+        sidebar = QScrollArea()
+        sidebar.setFixedWidth(320)
+        sidebar.setWidgetResizable(True)
+        sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sidebar.setFrameShape(QFrame.NoFrame)
+        sidebar.setWidget(left_panel)
+        content_layout.addWidget(sidebar)
 
         # ========== 右侧图表区：双组 4 行 ==========
         right_panel = QWidget()
@@ -291,11 +311,15 @@ class MainWindow(QMainWindow):
     def _on_system_settings(self):
         dlg = SystemSettingsDialog(self, self._runtime_config)
         if dlg.exec_() == dlg.Accepted:
+            previous_scale = self._vib_scale
             self._runtime_config = dlg.values
             self._apply_visual_settings(self._runtime_config)
+            if self._vib_scale != previous_scale:
+                self.vibration_scale_changed.emit(self._vib_scale)
 
     def connect_data_source(self, source):
         self._source = source
+        self._scale_controller.attach(source)
         source.data_received.connect(self._on_data)
         source.result_received.connect(self._on_result)
         source.info_received.connect(self._on_info)
@@ -330,10 +354,13 @@ class MainWindow(QMainWindow):
                 for ch in ALL_CHANNELS:
                     val = msg.get(f"{side}_{ch}")
                     if val is not None:
-                        self._charts[side][ch].add_data([t0], [val])
+                        # 单点和批量采用相同口径：曲线可缩放，极值始终统计原始值。
+                        display_val = val * self._vib_scale if ch in VIBRATION_CHANNELS else val
+                        self._charts[side][ch].add_data([t0], [display_val], raw_values=[val])
                         has = True
                 if has:
                     self._side_next_time[side] = t0 + 1.0 / 2400
+                    self._side_has_data[side] = True
         else:
             # --- 批量数据分支 ---
             for side in SIDES:
@@ -355,7 +382,8 @@ class MainWindow(QMainWindow):
                         local_times = [t0 + i * dt for i in range(n)]
                         if ch in VIBRATION_CHANNELS and self._vib_scale != 1.0:
                             scaled = [v * self._vib_scale for v in values]
-                            self._charts[side][ch].add_data(local_times, scaled)
+                            # 额外传入缩放前数据，仅用于本轮原始加速度极值统计。
+                            self._charts[side][ch].add_data(local_times, scaled, raw_values=values)
                         else:
                             self._charts[side][ch].add_data(local_times, values)
                         has = True
@@ -401,13 +429,19 @@ class MainWindow(QMainWindow):
         mode = msg.get("mode", "——")
         mode_display = {"auto": "自动", "manual": "人工"}.get(mode, mode)
 
-        # 如果该侧已有数据，说明是新的一轮检测，自动清空该侧
-        if self._side_has_data.get(side):
+        # 新协议以 round_id 判断轮次；info 可能只是重连时的相同工位信息。
+        if self._side_has_data.get(side) and self._scale_controller.clear_on_info(side):
             self._clear_side(side)
 
         labels["barcode"].setText(f"条码: {barcode}")
         labels["spec"].setText(f"规格: {spec}")
         labels["mode"].setText(f"模式: {mode_display}")
+
+    def _on_scale_round(self, side):
+        self._clear_side(side)
+        current = self._scale_controller.snapshot["rounds"][side]
+        self._info_labels[side]["barcode"].setText(f"条码: {current.get('barcode', '——')}")
+        self._info_labels[side]["spec"].setText(f"规格: {current.get('spec', '——')}")
 
     def _on_model_list(self, models: list):
         pass  # 前端不需要选模型，仅接收

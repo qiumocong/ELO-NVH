@@ -29,6 +29,12 @@ class WebSocketClient(QObject):
     info_received = pyqtSignal(dict)       # 工位信息: barcode, spec, mode
     model_list_received = pyqtSignal(list)
     connection_changed = pyqtSignal(bool)
+    # 带连接序号的比例专用事件，避免重连后迟到的旧确认/发送失败更新新连接。
+    scale_connection_changed = pyqtSignal(bool, int)
+    scale_state_received = pyqtSignal(dict)
+    scale_ack_received = pyqtSignal(dict)
+    scale_send_failed = pyqtSignal(dict)
+    supports_scale_protocol = True
 
     def __init__(self, url: str = "ws://localhost:8080", reconnect_interval: int = 3):
         super().__init__()
@@ -37,8 +43,32 @@ class WebSocketClient(QObject):
         self._ws = None                 # WebSocket 连接对象
         self._loop = None               # asyncio 事件循环（跑在子线程里）
         self._thread = None             # 子线程对象
+        self._connect_task = None
         self._running = False           # 是否正在运行
         self._connected = False         # 是否已连接
+        self.connection_serial = 0
+
+    def send_scale_message(self, msg, connection_serial):
+        """比例消息不跨连接排队；成功排队仍须等 scale_ack 才算确认。"""
+        loop, ws = self._loop, self._ws
+        if (not self._connected or connection_serial != self.connection_serial
+                or loop is None or not loop.is_running() or ws is None):
+            return False
+        coroutine = self._send_scale(msg, ws, connection_serial)
+        try:
+            asyncio.run_coroutine_threadsafe(coroutine, loop)
+            return True
+        except RuntimeError:
+            coroutine.close()
+            return False
+
+    async def _send_scale(self, msg, ws, serial):
+        try:
+            if self._ws is not ws or serial != self.connection_serial:
+                raise RuntimeError("比例消息所属连接已结束")
+            await ws.send(json.dumps(msg, allow_nan=False))
+        except Exception:
+            self.scale_send_failed.emit({"connection_serial": serial, "message": msg})
 
     def start(self):
         """启动 WebSocket 客户端线程"""
@@ -52,9 +82,16 @@ class WebSocketClient(QObject):
     def stop(self):
         """停止客户端"""
         self._running = False
-        if self._loop:
-            # 线程安全地停止事件循环
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        loop = self._loop
+        if loop and loop.is_running():
+            # 取消连接协程，让 async with 正常关闭 socket；不能直接停仍有任务的循环。
+            def cancel_connection():
+                if self._connect_task is not None:
+                    self._connect_task.cancel()
+            try:
+                loop.call_soon_threadsafe(cancel_connection)
+            except RuntimeError:
+                pass
 
     def send_message(self, msg: dict):
         """线程安全地发送消息给后端"""
@@ -83,7 +120,18 @@ class WebSocketClient(QObject):
         """在独立线程中运行 asyncio 事件循环"""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._connect_loop())
+        self._connect_task = self._loop.create_task(self._connect_loop())
+        try:
+            self._loop.run_until_complete(self._connect_task)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            pending = asyncio.all_tasks(self._loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            self._loop.close()
 
     async def _connect_loop(self):
         """持续尝试连接，断线自动重连"""
@@ -94,6 +142,8 @@ class WebSocketClient(QObject):
                 async with websockets.connect(self.url) as ws:
                     self._ws = ws
                     self._connected = True
+                    self.connection_serial += 1
+                    self.scale_connection_changed.emit(True, self.connection_serial)
                     self.connection_changed.emit(True)  # 通知主线程：已连接
                     await self._receive_loop(ws)         # 开始接收消息
             except Exception as e:
@@ -102,6 +152,7 @@ class WebSocketClient(QObject):
             finally:
                 self._ws = None
                 self._connected = False
+                self.scale_connection_changed.emit(False, self.connection_serial)
                 self.connection_changed.emit(False)  # 通知主线程：已断开
 
             # 等待一段时间后重试
@@ -110,7 +161,7 @@ class WebSocketClient(QObject):
 
     async def _receive_loop(self, ws):
         """持续接收后端消息并分发"""
-        import websockets
+        from websockets.exceptions import ConnectionClosed
         try:
             async for raw in ws:  # 每收到一条消息就执行一次循环
                 try:
@@ -118,7 +169,7 @@ class WebSocketClient(QObject):
                 except json.JSONDecodeError:
                     continue  # 不是合法 JSON，跳过
                 self._dispatch(msg)  # 根据消息类型分发
-        except websockets.ConnectionClosed:
+        except ConnectionClosed:
             pass  # 连接断开，退出循环
 
     async def _send(self, msg: dict):
@@ -139,6 +190,8 @@ class WebSocketClient(QObject):
         - {"type": "obj_id", "obj_id": "OBJ202601010001"}        → 工件编号
         - {"type": "model_list", "models": ["模型A", "模型B"]}    → 模型列表
         """
+        if not isinstance(msg, dict):
+            return
         msg_type = msg.get("type", "")
         if msg_type in ("data", "data_batch"):
             self.data_received.emit(msg)
@@ -148,3 +201,7 @@ class WebSocketClient(QObject):
             self.info_received.emit(msg)
         elif msg_type == "model_list":
             self.model_list_received.emit(msg.get("models", []))
+        elif msg_type in ("scale_state", "scale_ack"):
+            packet = dict(msg, _connection_serial=self.connection_serial)
+            signal = self.scale_state_received if msg_type == "scale_state" else self.scale_ack_received
+            signal.emit(packet)
