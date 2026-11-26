@@ -3,19 +3,21 @@
 """
 
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame, QScrollArea
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from config import VIBRATION_CHANNELS
 from ui.status_bar import StatusBarWidget
 from ui.time_chart import TimeChart
 from ui.spectrum_chart import SpectrumChart
 from ui.labeler_panel import LabelerPanel
 from ui.system_settings_dialog import SystemSettingsDialog
+from ui.scale_status import ScaleStatusLabel
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app_config import load as load_runtime_config
+from qianduan.scale_controller import ScaleController
 
 SIDES = ["left", "right"]
 ALL_CHANNELS = ["x", "y", "z", "current"]
@@ -24,6 +26,9 @@ SIDE_TITLES = {"left": "左工位", "right": "右工位"}
 
 class LabelerWindow(QMainWindow):
     """数据集标注主窗口"""
+
+    # 与检测窗口一致：取消、保存失败、只调整纵轴均不产生比例变更事件。
+    vibration_scale_changed = pyqtSignal(float)
 
     def __init__(self):
         super().__init__()
@@ -37,13 +42,18 @@ class LabelerWindow(QMainWindow):
         self._side_has_data = {"left": False, "right": False}
         self._side_next_time = {"left": 0.0, "right": 0.0}
         self._vib_scale = 1.0
-        self._runtime_config = load_runtime_config()
-        self._vib_scale = float(self._runtime_config.get("vibration_scale", 1.0))
+        self._runtime_config = dict(load_runtime_config())
+        # 比例仅在本次运行中沿用，不继承上次运行保存的比例。
+        self._runtime_config["vibration_scale"] = self._vib_scale
         self._last_batch_id = {"left": -1, "right": -1}
         self._diag_rx_count = 0
         self._diag_rx_dup = 0
         self._diag_start_time = None
 
+        self._scale_controller = ScaleController(self)
+        self._scale_controller.round_changed.connect(self._on_scale_round)
+        self._scale_controller.legacy_clear_requested.connect(self._clear_side)
+        self.vibration_scale_changed.connect(self._scale_controller.change_scale)
         self._setup_ui()
         self._restore_visual_settings()
 
@@ -73,7 +83,7 @@ class LabelerWindow(QMainWindow):
 
         # ========== 左侧面板 ==========
         left_panel = QWidget()
-        left_panel.setFixedWidth(320)
+        left_panel.setMinimumWidth(290)
         left_panel.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #e0e0e0;")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(12, 20, 12, 12)
@@ -81,11 +91,13 @@ class LabelerWindow(QMainWindow):
 
         # 工位信息
         self._info_labels = {}
+        self._scale_labels = {}
         for side in SIDES:
             frame = QFrame()
+            frame.setObjectName("stationInfo")
             frame.setFrameShape(QFrame.StyledPanel)
             frame.setStyleSheet("""
-                QFrame {
+                QFrame#stationInfo {
                     background-color: #f0f4f8;
                     border: 1px solid #d0d8e0;
                     border-radius: 6px;
@@ -111,6 +123,9 @@ class LabelerWindow(QMainWindow):
             mode = QLabel("模式: ——")
             mode.setStyleSheet("font-size: 12px; color: #555;")
             fl.addWidget(mode)
+
+            self._scale_labels[side] = ScaleStatusLabel(self._scale_controller, side)
+            fl.addWidget(self._scale_labels[side])
 
             self._info_labels[side] = {"barcode": barcode, "spec": spec, "mode": mode}
             left_layout.addWidget(frame)
@@ -140,21 +155,26 @@ class LabelerWindow(QMainWindow):
         self._system_settings_btn.clicked.connect(self._on_system_settings)
         left_layout.addWidget(self._system_settings_btn)
 
-        # 左侧标注面板
+        # 恢复原版左右标注面板上下排列，保留两侧全部操作入口。
         self._labeler_left = LabelerPanel("left")
         left_layout.addWidget(self._labeler_left, stretch=1)
 
-        # 分隔
         sep3 = QFrame()
         sep3.setFrameShape(QFrame.HLine)
         sep3.setStyleSheet("color: #ccc;")
         left_layout.addWidget(sep3)
 
-        # 右侧标注面板
         self._labeler_right = LabelerPanel("right")
         left_layout.addWidget(self._labeler_right, stretch=1)
 
-        content_layout.addWidget(left_panel)
+        # 标注按钮有固定高度；信息增加后用滚动侧栏保留全部操作入口。
+        sidebar = QScrollArea()
+        sidebar.setFixedWidth(320)
+        sidebar.setWidgetResizable(True)
+        sidebar.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sidebar.setFrameShape(QFrame.NoFrame)
+        sidebar.setWidget(left_panel)
+        content_layout.addWidget(sidebar)
 
         # ========== 右侧图表区：双组 4 行 ==========
         right_panel = QWidget()
@@ -222,8 +242,11 @@ class LabelerWindow(QMainWindow):
     def _on_system_settings(self):
         dlg = SystemSettingsDialog(self, self._runtime_config)
         if dlg.exec_() == dlg.Accepted:
+            previous_scale = self._vib_scale
             self._runtime_config = dlg.values
             self._apply_visual_settings(self._runtime_config)
+            if self._vib_scale != previous_scale:
+                self.vibration_scale_changed.emit(self._vib_scale)
 
     def _clear_side(self, side: str):
         for ch in ALL_CHANNELS:
@@ -240,6 +263,8 @@ class LabelerWindow(QMainWindow):
         self._spectrum_tick = 0
 
     def connect_data_source(self, source):
+        self._source = source
+        self._scale_controller.attach(source)
         source.data_received.connect(self._on_data)
         source.result_received.connect(self._on_result)
         source.info_received.connect(self._on_info)
@@ -324,12 +349,18 @@ class LabelerWindow(QMainWindow):
         mode = msg.get("mode", "——")
         mode_display = {"auto": "自动", "manual": "人工"}.get(mode, mode)
 
-        if self._side_has_data.get(side):
+        if self._side_has_data.get(side) and self._scale_controller.clear_on_info(side):
             self._clear_side(side)
 
         labels["barcode"].setText(f"条码: {barcode}")
         labels["spec"].setText(f"规格: {spec}")
         labels["mode"].setText(f"模式: {mode_display}")
+
+    def _on_scale_round(self, side):
+        self._clear_side(side)
+        current = self._scale_controller.snapshot["rounds"][side]
+        self._info_labels[side]["barcode"].setText(f"条码: {current.get('barcode', '——')}")
+        self._info_labels[side]["spec"].setText(f"规格: {current.get('spec', '——')}")
 
     def _on_result(self, msg: dict):
         side = msg.get("side", "left")

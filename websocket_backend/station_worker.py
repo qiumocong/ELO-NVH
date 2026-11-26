@@ -3,6 +3,9 @@ import os
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 import threading
 from config import *
 from plc_manager import plc_manager
@@ -11,10 +14,33 @@ from model_inference import get_model_for_spec, preprocess, predict
 import websocket_server
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
+if __package__:
+    from .scaled_data_writer import ScaledCopyResult, write_scaled_copy
+else:
+    from scaled_data_writer import ScaledCopyResult, write_scaled_copy
 
 # 设置 matplotlib 中文字体
 plt.rcParams["font.sans-serif"] = ["SimHei"]
 plt.rcParams["axes.unicode_minus"] = False
+
+
+@dataclass(frozen=True)
+class ChannelSaveLocation:
+    """本轮只生成一次安全名称；原始、副本及分段保存复用，空条码也不会分叉。"""
+
+    root: Path
+    directory: Path
+    spec_name: str
+    label_name: str
+    barcode_name: str
+
+
+@dataclass(frozen=True)
+class RoundSaveResult:
+    original_saved: bool
+    original_dir: Path
+    scaled: Optional[ScaledCopyResult]
+    original_error: Optional[str] = None
 
 
 class StationWorker:
@@ -33,6 +59,11 @@ class StationWorker:
         self.state = PC_STATUS_IDLE
         self.is_collecting = False
 
+        # 与临时推送标志 is_collecting 分离：正反转间隔仍属于同一采集轮次。
+        self._scale_lock = threading.Lock()
+        self._scale_round = None
+        self.frozen_scale_snapshot = None  # T6 保存时使用本轮冻结值，不读当前显示设置。
+
         # 记录各段样本索引（使用工位独立的样本计数）
         self.start_sample = 0
         self.first_end_sample = 0
@@ -44,32 +75,132 @@ class StationWorker:
 
     def stop(self):
         self.running = False
+        self._abort_scale_round("worker_stopped")
         if self.thread:
             self.thread.join(timeout=2.0)
+
+    def _begin_scale_round(self):
+        with self._scale_lock:
+            if not self.running:
+                return False
+            self._scale_round = websocket_server.scale_sessions.begin_round(
+                self.name, self.current_barcode, self.current_spec,
+            )
+            self.frozen_scale_snapshot = None
+            current = self._scale_round
+        print(f"[{self.name}] 比例轮次开始: {current.round_id}, 初始比例={current.save_scale:g}")
+        websocket_server.notify_scale_state("round_started")
+        return True
+
+    def _freeze_scale_round(self):
+        # 仅做内存状态切换。900 握手前不等网络、不广播、不缩放或写文件。
+        with self._scale_lock:
+            if self._scale_round is None:
+                raise RuntimeError("比例轮次尚未开始")
+            frozen = websocket_server.scale_sessions.finish_round(
+                self.name, self._scale_round.round_id,
+            )
+            self._scale_round = frozen
+            self.frozen_scale_snapshot = frozen
+            return frozen
+
+    def _abort_scale_round(self, reason):
+        with self._scale_lock:
+            if self._scale_round is None or self._scale_round.phase != "collecting":
+                return  # 已结束的冻结快照不能被人工等待中的重置/退出改写。
+            self._scale_round = websocket_server.scale_sessions.abort_round(
+                self.name, self._scale_round.round_id, reason,
+            )
+            self.is_collecting = False  # 这一轮已经放弃，不再把旧轮数据继续推送到前端。
+            current = self._scale_round
+        print(f"[{self.name}] 比例轮次取消: {current.round_id}, 原因={reason}")
+        websocket_server.notify_scale_state("round_aborted")
 
     def on_data_chunk(self, t_chunk, data_chunk):
         """采集回调：只有在采集状态下才推送数据到WebSocket"""
         if self.is_collecting and self.running:
             websocket_server.put_data(self.name, t_chunk, data_chunk)
 
-    def save_per_channel(self, t, data, label):
+    def _channel_save_location(self, barcode, spec, label):
         label_str = "OK" if label == 0 else "NG"
-        safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
-        safe_spec = "".join(c for c in self.current_spec if c.isalnum() or c in ('_', '-'))
+        safe_barcode = "".join(c for c in barcode if c.isalnum() or c in ('_', '-'))
+        safe_spec = "".join(c for c in spec if c.isalnum() or c in ('_', '-'))
         if not safe_barcode:
             safe_barcode = f"NOBARCODE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         if not safe_spec:
             safe_spec = "UNKNOWN_SPEC"
-        save_dir = os.path.join(DATA_SAVE_DIR, safe_spec, label_str, safe_barcode)
-        os.makedirs(save_dir, exist_ok=True)
+        root = Path(DATA_SAVE_DIR).expanduser().absolute()
+        return ChannelSaveLocation(root, root / safe_spec / label_str / safe_barcode,
+                                   safe_spec, label_str, safe_barcode)
+
+    def save_per_channel(self, t, data, label, *, save_location=None):
+        """原始五通道全写成功才返回本轮位置，失败直接交给外层记录。"""
+        location = save_location or self._channel_save_location(
+            self.current_barcode, self.current_spec, label,
+        )
+        if t.ndim != 1 or not t.size or data.shape != (5, t.size):
+            raise ValueError("原始训练数据必须为非空 times(N,) 和 data(5,N)")
+        location.directory.mkdir(parents=True, exist_ok=True)
 
         for i in range(data.shape[0]):
-            ch_path = os.path.join(save_dir, f"ch{i}.csv")
+            ch_path = location.directory / f"ch{i}.csv"
             df = pd.DataFrame({"time": t, f"ch{i}": data[i, :]})
             df.to_csv(ch_path, index=False)
-        print(f"[{self.name}] 训练数据已保存至 {save_dir}")
+        print(f"[{self.name}] 训练数据已保存至 {location.directory}")
+        return location
 
-    def _save_positive_negative_data(self, t1, data1, t2, data2, label):
+    def _save_round_data(self, t, data, t1, data1, t2, data2, label, frozen):
+        """原始 → 可选副本 → 原分段格式；各保存失败独立，不改变 PLC 判定。
+
+        frozen 为本轮 900 时的局部不可变对象，不能在人工等待后读取全局比例或
+        self.current_barcode/spec。副本绝不替代原始数据；原始失败则禁止生成副本。
+        """
+        if frozen.phase != "finished" or frozen.side != self.name:
+            raise ValueError("保存必须使用本工位已经结束的冻结轮次")
+        location = self._channel_save_location(frozen.barcode, frozen.spec, label)
+        context = f"[{self.name}] round={frozen.round_id} scale={frozen.save_scale:g}"
+        original_saved, original_error, scaled = False, None, None
+        try:
+            saved = self.save_per_channel(t, data, label, save_location=location)
+            if saved != location:
+                raise RuntimeError("原始保存未返回本轮成功位置，不能确认原始五通道已保存")
+            original_saved = True
+            print(f"{context} 原始保存成功: {location.directory}")
+        except Exception as exc:
+            original_error = f"{type(exc).__name__}: {exc}"
+            print(f"{context} 原始保存失败: {location.directory}; {original_error}; 副本不生成")
+
+        if original_saved:
+            try:
+                # 由真实原始根目录派生，副本不放进原始训练扫描树，不受新格式开关控制。
+                if not location.root.name:
+                    raise ValueError("原始训练根目录是磁盘根目录，无法派生同级副本目录")
+                scaled_root = location.root.with_name(location.root.name + "_scaled")
+                scaled = write_scaled_copy(
+                    scaled_root, location.spec_name, location.label_name, location.barcode_name,
+                    t, data, frozen.save_scale,
+                    metadata={
+                        "original_dir": str(location.directory), "side": frozen.side,
+                        "round_id": frozen.round_id, "barcode": frozen.barcode, "spec": frozen.spec,
+                        "label": location.label_name, "initial_scale": frozen.initial_scale,
+                        "locked": frozen.locked, "session_id": frozen.session_id,
+                        "change_request_id": frozen.change_request_id,
+                    },
+                )
+            except Exception as exc:
+                # T2 正常返回 failed；此处兜底派生路径/意外异常，分段保存仍继续。
+                scaled = ScaledCopyResult("failed", scale=frozen.save_scale,
+                                          error=f"{type(exc).__name__}: {exc}")
+            print(f"{context} 副本状态={scaled.status}; 目录={scaled.directory}; 错误={scaled.error}")
+
+        try:
+            self._save_positive_negative_data(t1, data1, t2, data2, label,
+                                              barcode_name=location.barcode_name)
+        except Exception as exc:
+            print(f"{context} 分段保存异常: {type(exc).__name__}: {exc}")
+        return RoundSaveResult(original_saved, location.directory, scaled, original_error)
+
+    def _save_positive_negative_data(self, t1, data1, t2, data2, label, *, barcode_name=None):
         """保存正转/反转数据、各轴振动图、电流图、音频（三轴）"""
         if not ENABLE_NEW_SAVE:
             return
@@ -80,7 +211,9 @@ class StationWorker:
             ymd = now.strftime("%Y%m%d")
             hm = now.strftime("%H%M")
             label_str = "OK" if label == 0 else "NG"
-            safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
+            safe_barcode = barcode_name
+            if safe_barcode is None:
+                safe_barcode = "".join(c for c in self.current_barcode if c.isalnum() or c in ('_', '-'))
             if not safe_barcode:
                 safe_barcode = f"NOBARCODE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -223,6 +356,7 @@ class StationWorker:
 
     def reset_flow(self):
         print(f"[{self.name}] 重置流程...")
+        self._abort_scale_round("flow_reset")
         self.is_collecting = False
         self.state = PC_STATUS_IDLE
 
@@ -336,6 +470,8 @@ class StationWorker:
                     continue
 
                 print(f"[{self.name}] 收到START命令，开始采集...")
+                if not self._begin_scale_round():
+                    break
                 self.is_collecting = True
 
                 # 启动该工位的采集（独立延迟）
@@ -368,6 +504,7 @@ class StationWorker:
                     continue
 
                 if reason == "data_ready":
+                    self._abort_scale_round("new_data_ready")
                     self.read_plc_data()
                     continue
 
@@ -397,6 +534,7 @@ class StationWorker:
                     continue
 
                 if reason == "data_ready":
+                    self._abort_scale_round("new_data_ready")
                     self.read_plc_data()
                     continue
 
@@ -428,6 +566,7 @@ class StationWorker:
                     continue
 
                 if reason == "data_ready":
+                    self._abort_scale_round("new_data_ready")
                     self.read_plc_data()
                     continue
 
@@ -438,15 +577,23 @@ class StationWorker:
 
                 print(f"[{self.name}] 收到STOP命令，停止采集...")
                 self.is_collecting = False
+                frozen_scale = self._freeze_scale_round()
                 # PLC 要求 5s 内回 900 握手确认
                 self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.stop_sample = shared_daq.get_sample_count(self.name)
+                print(f"[{self.name}] 比例轮次冻结: {frozen_scale.round_id}, 保存比例={frozen_scale.save_scale:g}")
+                websocket_server.notify_scale_state("round_finished")
 
                 # 获取该工位的数据段（两段拼接）
                 # 第一段: start_sample (0) ~ first_end_sample
                 t1, data1 = shared_daq.get_data_slice(self.name, self.start_sample, self.first_end_sample)
+                t1, data1 = np.array(t1, copy=True), np.array(data1, copy=True)
                 # 第二段: second_start_sample ~ stop_sample
                 t2, data2 = shared_daq.get_data_slice(self.name, self.second_start_sample, self.stop_sample)
+                t2, data2 = np.array(t2, copy=True), np.array(data2, copy=True)
+                # 在推理/人工等待前脱离共享采集缓存，整轮及分段保存共用稳定的原始快照。
+                for values in (t1, data1, t2, data2):
+                    values.setflags(write=False)
 
                 # 拼接数据
                 if t1.size > 0 and t2.size > 0:
@@ -461,12 +608,16 @@ class StationWorker:
 
                 if t.size == 0:
                     print(f"[{self.name}] 无数据")
+                    # 已在 900 关闭轮次；无数据不进入保存，不遗留 collecting 状态。
+                    websocket_server.notify_scale_state("round_no_data")
                     self.plc.write_result(self.name, 2)
                     self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                     self.state = PC_STATUS_IDLE
                     continue
 
-                # 推理
+                t.setflags(write=False)
+                data.setflags(write=False)
+                # 推理仍使用原始值；缩放只在原始 CSV 成功保存后作用于 T2 自己的副本。
                 label, score = self._do_inference(data)
 
                 # 写入结果
@@ -478,15 +629,16 @@ class StationWorker:
                 self.plc.write_pc_status(self.name, PC_STATUS_COMPLETE)
                 self.state = PC_STATUS_IDLE
 
-                # 保存数据（新格式和旧格式）
-                self._save_positive_negative_data(t1, data1, t2, data2, label)
-                self.save_per_channel(t, data, label)
-
-                print(f"[{self.name}] 处理完成\n")
+                saved = self._save_round_data(t, data, t1, data1, t2, data2, label, frozen_scale)
+                if saved.original_saved:
+                    print(f"[{self.name}] 处理完成（原始已保存；副本状态={saved.scaled.status}）\n")
+                else:
+                    print(f"[{self.name}] 本轮保存不完整：原始训练 CSV 保存失败\n")
                 # 清空WebSocket缓冲（只清空本工位）
                 websocket_server.clear_buffer(self.name)
 
             except Exception as e:
+                self._abort_scale_round("worker_error")
                 if "重置" in str(e):
                     continue
                 print(f"[{self.name}] 异常: {e}")
@@ -500,4 +652,5 @@ class StationWorker:
                 self.state = PC_STATUS_IDLE
                 time.sleep(1)
 
+        self._abort_scale_round("worker_stopped")
         print(f"[{self.name}] 线程退出")

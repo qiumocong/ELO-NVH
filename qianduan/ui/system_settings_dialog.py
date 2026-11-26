@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from app_config import ensure_directories, load, save
+from app_config import load, save
 from app.version import APP_VERSION
 from qianduan.ui.update_dialog import UpdateDialog
 
@@ -273,13 +273,20 @@ class SystemSettingsDialog(QDialog):
             "data_save_dir": self._data_save_dir.text().strip(),
             "new_data_save_dir": self._new_data_save_dir.text().strip(),
         }
-        if not ws_url or not (ws_url.startswith("ws://") or ws_url.startswith("wss://")):
+        # 只检查本次修改的通信/存储项，旧机器的遗留配置不应阻断显示设置。
+        changed_paths = {
+            key: value for key, value in paths.items()
+            if value != str(self._values[key]).strip()
+        }
+        ws_changed = ws_url != str(self._values["ws_url"]).strip()
+        plc_changed = plc_ip != str(self._values["plc_ip"]).strip()
+        if ws_changed and (not ws_url or not (ws_url.startswith("ws://") or ws_url.startswith("wss://"))):
             QMessageBox.warning(self, "设置无效", "请输入有效的 WebSocket 地址（ws:// 或 wss://）。")
             return
-        if not plc_ip:
+        if plc_changed and not plc_ip:
             QMessageBox.warning(self, "设置无效", "PLC 地址不能为空。")
             return
-        if any(not value for value in paths.values()):
+        if any(not value for value in changed_paths.values()):
             QMessageBox.warning(self, "设置无效", "日志和数据保存路径不能为空。")
             return
 
@@ -305,7 +312,10 @@ class SystemSettingsDialog(QDialog):
             }
         )
         try:
-            ensure_directories(values)
+            # 前端保存设置不负责模型迁移，也不创建未修改的日志/数据目录。
+            # 真正修改的存储路径仍先尝试创建；失败时不接受设置、不应用比例。
+            for path in changed_paths.values():
+                Path(path).expanduser().mkdir(parents=True, exist_ok=True)
             self.values = save(values)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "保存失败", f"无法保存设置：{exc}")

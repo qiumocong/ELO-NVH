@@ -1,9 +1,15 @@
 import asyncio
 import json
 import time as _time
+import uuid
 from collections import deque
 import websockets
+from websockets.exceptions import ConnectionClosed
 from config import BACKEND_HOST, BACKEND_PORT
+if __package__:
+    from .scale_session import ScaleSessionManager
+else:
+    from scale_session import ScaleSessionManager
 
 # ---- 全局状态 ----
 left_data = deque(maxlen=1)
@@ -21,6 +27,92 @@ ws_loop = None
 pending_label = {"left": None, "right": None}
 _broadcast_seq = 0  # 全局广播序号（诊断用）
 
+# 全后端只使用这一份状态；比例请求和 PLC 生命周期通过 T3 内部锁串行处理。
+scale_sessions = ScaleSessionManager()
+SCALE_PROTOCOL_VERSION = 1
+
+
+def scale_state_message(event="snapshot"):
+    return {
+        "type": "scale_state", "protocol_version": SCALE_PROTOCOL_VERSION,
+        "event": event, "snapshot": scale_sessions.get_snapshot().to_dict(),
+    }
+
+
+async def _send_scale_state(websocket, payload):
+    try:
+        await websocket.send(payload)
+    except Exception as exc:
+        # 连接关闭/发送错误不能回传到 PLC 线程，也不回滚已经确定的比例。
+        print(f"[WS] 比例状态发送失败: {exc}")
+
+
+def notify_scale_state(event):
+    """PLC 线程只排队通知，不等待网络；连接集合仅在事件循环内遍历。"""
+    loop = ws_loop
+    if loop is None or loop.is_closed() or not loop.is_running():
+        return
+
+    def publish():
+        payload = json.dumps(scale_state_message(event), ensure_ascii=False, allow_nan=False)
+        for websocket in tuple(connected_clients):
+            asyncio.create_task(_send_scale_state(websocket, payload))
+
+    try:
+        loop.call_soon_threadsafe(publish)
+    except RuntimeError:
+        pass  # 后端关闭事件循环与 PLC 线程退出可能同时发生。
+
+
+async def handle_scale_message(websocket, data, context):
+    """只校验/转交状态/确认；不采集、不推理、不缩放和写盘。
+
+    context 由 handler 持有。连接身份不能使用客户端发来的 connection_id。
+    会话先绑定再 await send，保证确认发送失败也能在 finally 解除控制连接。
+    """
+    action = data["type"]
+
+    def reject(reason):
+        return {
+            "accepted": False, "reason": reason,
+            "session_id": data.get("session_id") if isinstance(data.get("session_id"), str) else None,
+            "request_id": data.get("request_id") if type(data.get("request_id")) is int else None,
+            "snapshot": scale_sessions.get_snapshot().to_dict(),
+        }
+
+    required = ("session_id", "current_scale", "last_request_id") if action == "scale_session" else (
+        "session_id", "request_id", "scale", "expected_round_ids",
+    )
+    if type(data.get("protocol_version")) is not int or data["protocol_version"] != SCALE_PROTOCOL_VERSION:
+        result = reject("unsupported_protocol")
+    elif any(key not in data for key in required):
+        result = reject("missing_fields")
+    elif not isinstance(data["session_id"], str) or not data["session_id"].strip():
+        result = reject("invalid_session")
+    elif action == "scale_session":
+        acknowledgement = scale_sessions.register_session(
+            data["session_id"], context["connection_id"], data["current_scale"],
+            last_request_id=data["last_request_id"],
+        )
+        result = acknowledgement.to_dict()
+        if acknowledgement.accepted:
+            context["session_id"] = data["session_id"]
+    elif context["session_id"] is None:
+        result = reject("session_not_registered")
+    elif context["session_id"] != data["session_id"]:
+        result = reject("session_binding_mismatch")
+    else:
+        result = scale_sessions.apply_scale_change(
+            data["session_id"], data["request_id"], data["scale"], data["expected_round_ids"],
+            connection_id=context["connection_id"],
+        ).to_dict()
+    await websocket.send(json.dumps({
+        "type": "scale_ack", "protocol_version": SCALE_PROTOCOL_VERSION,
+        "action": action, **result,
+    }, ensure_ascii=False, allow_nan=False))
+    if result["accepted"]:
+        notify_scale_state(action)
+
 # ---- 服务启动 ----
 def start_ws_server():
     loop = asyncio.new_event_loop()
@@ -36,7 +128,9 @@ async def ws_main():
         await asyncio.Future()  # 永久运行
 
 # ---- 客户端连接处理 ----
-async def handler(websocket, path):
+async def handler(websocket, path=None):
+    # path=None 同时兼容旧版双参数 handler 与新版 websockets 单参数 handler。
+    context = {"connection_id": uuid.uuid4().hex, "session_id": None}
     connected_clients.add(websocket)
     try:
         # 发送模型列表（示例，可从配置读取）
@@ -54,12 +148,18 @@ async def handler(websocket, path):
                 "spec": info["spec"],
                 "mode": info["mode"]
             }))
+        # 新增独立快照，不更改旧 info 内容；重连收到 info 不等于新轮次。
+        await websocket.send(json.dumps(scale_state_message("connected"), ensure_ascii=False))
         # 接收消息
         async for message in websocket:
             try:
                 data = json.loads(message)
+                if not isinstance(data, dict):
+                    continue
                 msg_type = data.get("type")
-                if msg_type == "select_model":
+                if msg_type in ("scale_session", "scale_change"):
+                    await handle_scale_message(websocket, data, context)
+                elif msg_type == "select_model":
                     print(f"[WS] 选择模型: {data.get('model_id')}")
                     # 可回发确认
                     await websocket.send(json.dumps({
@@ -78,10 +178,16 @@ async def handler(websocket, path):
                     print(f"[WS] 未知消息: {msg_type}")
             except json.JSONDecodeError:
                 pass
-    except websockets.exceptions.ConnectionClosed:
+    except ConnectionClosed:
         pass
     finally:
-        connected_clients.remove(websocket)
+        connected_clients.discard(websocket)
+        if context["session_id"] is not None:
+            acknowledgement = scale_sessions.disconnect_session(
+                context["session_id"], context["connection_id"],
+            )
+            if acknowledgement.accepted:
+                notify_scale_state("disconnected")
 
 # ---- 数据广播循环 ----
 async def data_broadcast_loop():
