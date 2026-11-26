@@ -16,6 +16,7 @@ hiddenimports = [
     "qianduan.ui.main_window",
     "qianduan.ui.result_panel",
     "qianduan.ui.scale_dialog",
+    "qianduan.ui.scale_status",
     "qianduan.ui.settings_dialog",
     "qianduan.ui.spectrum_chart",
     "qianduan.ui.status_bar",
@@ -42,6 +43,7 @@ a = Analysis(
     pathex=[".."],
     binaries=[],
     datas=[
+        ("../.app_version", "."),
         ("../qianduan/yanpu_logo.png", "qianduan"),
     ] + copy_metadata("nidaqmx"),
     hiddenimports=hiddenimports,

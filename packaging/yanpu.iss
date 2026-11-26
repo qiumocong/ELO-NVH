@@ -1,8 +1,10 @@
 ; ELO-NVH desktop application installer
-; Build with: ISCC.exe /DMyAppVersion=0.1.3 packaging\yanpu.iss
+; Build with build_installer.ps1; the default version comes from .app_version.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.1.3"
+  #define VersionFile FileOpen(AddBackslash(SourcePath) + "..\.app_version")
+  #define MyAppVersion Trim(FileRead(VersionFile))
+  #expr FileClose(VersionFile)
 #endif
 
 #define MyAppName "ELO-NVH 振动质检系统"

@@ -18,7 +18,7 @@ total_chunks = int((sample_rate * collect_total_time) / chunk_samples)
 total_samples = int(sample_rate * collect_total_time)
 
 # 输出路径配置
-save_dir = "C:/Users/Noko/PycharmProjects/yanpu/data"
+save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(save_dir, exist_ok=True)
 save_file_path = os.path.join(save_dir, "daq_stream_data.csv")
 # ======================================================

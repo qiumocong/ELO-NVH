@@ -7,13 +7,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
 
-if ($Version) {
-    $versionScript = Join-Path $repoRoot "packaging\set_app_version.ps1"
-    & $versionScript -Version $Version
-    if (-not $?) {
-        throw "Could not synchronize application version."
-    }
-}
+$Version = & (Join-Path $repoRoot "packaging\set_app_version.ps1") -Version $Version
 
 $python = if ($PythonPath) { (Resolve-Path -LiteralPath $PythonPath).Path } else { Join-Path $repoRoot ".venv\Scripts\python.exe" }
 if (-not (Test-Path -LiteralPath $python)) {

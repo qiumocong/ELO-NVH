@@ -41,13 +41,30 @@ DEFAULTS: Dict[str, Any] = {
     "backend_port": 8081,
     "plc_ip": "192.168.3.124",
     "plc_port": 1025,
-    "log_dir": str(USER_ROOT / "logs"),
-    "data_save_dir": str(USER_ROOT / "logs" / "saved_data"),
-    "new_data_save_dir": str(USER_ROOT / "data"),
+    "log_dir": "logs",
+    "data_save_dir": "logs/saved_data",
+    "new_data_save_dir": "data",
     # Model files are application assets/data and are intentionally not user-editable.
-    "model_dir": str(USER_ROOT / "logs" / "models"),
+    "model_dir": "logs/models",
     "enable_new_save": True,
 }
+
+
+PATH_KEYS = ("log_dir", "data_save_dir", "new_data_save_dir", "model_dir")
+
+
+def resolve_path(value: str) -> Path:
+    """Resolve storage paths against the application, independent of cwd."""
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else USER_ROOT / path).resolve()
+
+
+def relative_path(value: str) -> str:
+    """Persist portable paths; Windows cannot express a different drive relatively."""
+    try:
+        return Path(os.path.relpath(str(resolve_path(value)), str(USER_ROOT))).as_posix()
+    except ValueError as exc:
+        raise ValueError("保存路径必须与软件位于同一盘符，才能使用相对路径") from exc
 
 
 def canonical_model_dir() -> Path:
@@ -94,16 +111,34 @@ def load() -> Dict[str, Any]:
                 values.update({k: v for k, v in loaded.items() if k in DEFAULTS})
     except (OSError, ValueError) as exc:
         logging.getLogger(__name__).warning("读取配置失败 %s: %s", path, exc)
-    # Ignore any historical/user-supplied model_dir value.  This keeps model
-    # loading and training on the installation's logs/models directory.
-    values["model_dir"] = str(canonical_model_dir())
+    # Older installations stored machine-specific absolute paths. Convert
+    # valid paths to portable values and replace stale paths from another
+    # drive with defaults before the next config save.
+    values["model_dir"] = DEFAULTS["model_dir"]
+    original_paths = {key: str(values[key]) for key in PATH_KEYS}
+    for key in PATH_KEYS:
+        try:
+            candidate = Path(str(values[key])).expanduser()
+            if candidate.is_absolute() and not candidate.exists():
+                values[key] = DEFAULTS[key]
+                continue
+            values[key] = relative_path(str(values[key]))
+        except (OSError, ValueError):
+            values[key] = DEFAULTS[key]
+    if any(values[key] != original_paths[key] for key in PATH_KEYS):
+        try:
+            save(values)
+        except (OSError, ValueError) as exc:
+            logging.getLogger(__name__).warning("迁移旧配置路径失败 %s: %s", path, exc)
     return values
 
 
 def save(values: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(DEFAULTS)
     merged.update({k: v for k, v in values.items() if k in DEFAULTS})
-    merged["model_dir"] = str(canonical_model_dir())
+    merged["model_dir"] = DEFAULTS["model_dir"]
+    for key in PATH_KEYS:
+        merged[key] = relative_path(str(merged[key]))
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
@@ -114,9 +149,9 @@ def save(values: Dict[str, Any]) -> Dict[str, Any]:
 
 def ensure_directories(values: Optional[Dict[str, Any]] = None) -> None:
     values = values or load()
-    values["model_dir"] = str(canonical_model_dir())
-    for key in ("log_dir", "data_save_dir", "new_data_save_dir", "model_dir"):
-        Path(str(values[key])).expanduser().mkdir(parents=True, exist_ok=True)
+    values["model_dir"] = DEFAULTS["model_dir"]
+    for key in PATH_KEYS:
+        resolve_path(str(values[key])).mkdir(parents=True, exist_ok=True)
     _migrate_bundled_models(canonical_model_dir())
 
 
@@ -129,7 +164,7 @@ def configure_logging(values: Optional[Dict[str, Any]] = None) -> None:
         return
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     file_handler = logging.handlers.RotatingFileHandler(
-        Path(str(values["log_dir"])) / "yanpu.log",
+        resolve_path(str(values["log_dir"])) / "yanpu.log",
         maxBytes=10 * 1024 * 1024,
         backupCount=5,
         encoding="utf-8",

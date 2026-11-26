@@ -28,7 +28,7 @@ from PyQt5.QtWidgets import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from app_config import load, save
+from app_config import load, save, resolve_path, relative_path
 from app.version import APP_VERSION
 from qianduan.ui.update_dialog import UpdateDialog
 
@@ -82,7 +82,7 @@ class SystemSettingsDialog(QDialog):
 
     @staticmethod
     def _browse(edit, label):
-        path = QFileDialog.getExistingDirectory(None, f"选择{label}", edit.text())
+        path = QFileDialog.getExistingDirectory(None, f"选择{label}", str(resolve_path(edit.text())))
         if path:
             edit.setText(path)
 
@@ -315,7 +315,8 @@ class SystemSettingsDialog(QDialog):
             # 前端保存设置不负责模型迁移，也不创建未修改的日志/数据目录。
             # 真正修改的存储路径仍先尝试创建；失败时不接受设置、不应用比例。
             for path in changed_paths.values():
-                Path(path).expanduser().mkdir(parents=True, exist_ok=True)
+                relative_path(path)  # Validate the drive before creating a directory.
+                resolve_path(path).mkdir(parents=True, exist_ok=True)
             self.values = save(values)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "保存失败", f"无法保存设置：{exc}")

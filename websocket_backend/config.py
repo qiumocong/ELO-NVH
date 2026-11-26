@@ -3,14 +3,14 @@ import torch
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app_config import load as _load_runtime_config, ensure_directories
+from app_config import load as _load_runtime_config, ensure_directories, resolve_path
 
 _runtime = _load_runtime_config()
 ensure_directories(_runtime)
 BACKEND_HOST = _runtime.get("backend_host", "0.0.0.0")
 BACKEND_PORT = int(_runtime.get("backend_port", 8081))
 
-SAVE_DIR = _runtime["log_dir"]
+SAVE_DIR = str(resolve_path(_runtime["log_dir"]))
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 # ---------- PLC ----------
@@ -92,14 +92,14 @@ CURRENT_SENSOR_MAX = 30.0
 START_DELAY =0.0 # 延迟开始采集时间（秒）
 
 # ---------- 模型 ----------
-MODEL_DIR = _runtime["model_dir"]
+MODEL_DIR = str(resolve_path(_runtime["model_dir"]))
 os.makedirs(MODEL_DIR, exist_ok=True)
 DEFAULT_MODEL_PATH = os.path.join(MODEL_DIR, "default.pth")
 # DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEVICE = torch.device("cpu")
 
 # ---------- 数据保存 ----------
-DATA_SAVE_DIR = _runtime["data_save_dir"]
+DATA_SAVE_DIR = str(resolve_path(_runtime["data_save_dir"]))
 OK_DIRNAME = "OK"
 NG_DIRNAME = "NG"
 os.makedirs(DATA_SAVE_DIR, exist_ok=True)
@@ -120,6 +120,6 @@ TRAIN_CONFIG = {
 }
 
 # ---------- 新增存储配置 ----------
-NEW_DATA_SAVE_DIR = _runtime["new_data_save_dir"]
+NEW_DATA_SAVE_DIR = str(resolve_path(_runtime["new_data_save_dir"]))
 ENABLE_NEW_SAVE = bool(_runtime["enable_new_save"])
 os.makedirs(NEW_DATA_SAVE_DIR, exist_ok=True)

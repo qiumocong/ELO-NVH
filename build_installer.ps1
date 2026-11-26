@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.1.3",
+    [string]$Version = "",
     [switch]$SkipAppBuild,
     [string]$PythonPath = ""
 )
@@ -8,6 +8,19 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
+
+# Fail before the expensive application build if the installer compiler is absent.
+$isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+$isccCandidates = @(
+    $(if ($isccCommand) { $isccCommand.Source }),
+    (Join-Path ${env:LOCALAPPDATA} "Programs\Inno Setup 6\ISCC.exe"),
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+$iscc = $isccCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+if (-not $iscc) {
+    throw "Do not find Inno Setup's ISCC.exe. Please install Inno Setup 6 and try again."
+}
 
 $python = if ($PythonPath) { (Resolve-Path -LiteralPath $PythonPath).Path } else { Join-Path $repoRoot ".venv\Scripts\python.exe" }
 if (-not (Test-Path -LiteralPath $python)) {
@@ -18,6 +31,8 @@ if (-not (Test-Path -LiteralPath $python)) {
     $python = $pythonCommand.Source
 }
 
+$Version = & (Join-Path $repoRoot "packaging\set_app_version.ps1") -Version $Version
+
 if (-not $SkipAppBuild) {
     Write-Host "Building PyInstaller Release..."
     $buildWindows = Join-Path $repoRoot "build_windows.ps1"
@@ -26,13 +41,10 @@ if (-not $SkipAppBuild) {
         throw "Application build failed, Exit Code $LASTEXITCODE."
     }
 } else {
-    $versionText = [System.IO.File]::ReadAllText((Join-Path $repoRoot "app\version.py"))
-    if ($versionText -notmatch ('APP_VERSION\s*=\s*"' + [regex]::Escape($Version) + '"')) {
-        throw "The existing application does not contain APP_VERSION=$Version. Rebuild it with -Version $Version before using -SkipAppBuild."
-    }
-    $projectText = [System.IO.File]::ReadAllText((Join-Path $repoRoot "pyproject.toml"))
-    if ($projectText -notmatch ('(?m)^version\s*=\s*"' + [regex]::Escape($Version) + '"')) {
-        throw "pyproject.toml does not contain version=$Version. Rebuild it with -Version $Version before using -SkipAppBuild."
+    $builtVersionFile = Join-Path $repoRoot "dist\ELO-NVH\_internal\.app_version"
+    if (-not (Test-Path -LiteralPath $builtVersionFile) -or
+        [System.IO.File]::ReadAllText($builtVersionFile).Trim() -ne $Version) {
+        throw "The built application version differs from $Version. Rebuild before using -SkipAppBuild."
     }
 }
 
@@ -47,16 +59,6 @@ Copy-Item -Path (Join-Path $modelSource "*.pth") -Destination $modelTarget -Forc
 $appExe = Join-Path $repoRoot "dist\ELO-NVH\ELO-NVH.exe"
 if (-not (Test-Path -LiteralPath $appExe)) {
     throw "Do not find $appExe. Please complete the application build first."
-}
-
-$isccCandidates = @(
-    (Join-Path ${env:LOCALAPPDATA} "Programs\Inno Setup 6\ISCC.exe"),
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe"
-)
-$iscc = $isccCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if (-not $iscc) {
-    throw "Do not find Inno Setup's ISCC.exe. Please install Inno Setup 6 and try again."
 }
 
 Write-Host "Building installer..."

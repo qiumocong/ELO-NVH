@@ -2,9 +2,10 @@ import os
 import re
 import pandas as pd
 
-OK_DIR = r"D:\qmc\PycharmProjects\yanpu\data\01-原始excel文件\OK"
-NG_DIR = r"D:\qmc\PycharmProjects\yanpu\data\01-原始excel文件\NG"
-OUT_ROOT = r"D:\qmc\PycharmProjects\yanpu\data\02-转换csv"
+DATA_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+OK_DIR = os.path.join(DATA_ROOT, "01-原始excel文件", "OK")
+NG_DIR = os.path.join(DATA_ROOT, "01-原始excel文件", "NG")
+OUT_ROOT = os.path.join(DATA_ROOT, "02-转换csv")
 
 META_KEYS = {
     "first_row": re.compile(r"^\s*first\s*row\s*:\s*$", re.IGNORECASE),

@@ -30,7 +30,7 @@ current_sensor_max = 30.0  # 电流传感器最大测量值 30A
 sensor_output_max = 10.0  # 传感器最大输出电压 10V
 
 # 输出路径配置
-save_dir = "C:/Users/Noko/PycharmProjects/yanpu/data"
+save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(save_dir, exist_ok=True)
 save_file_path = os.path.join(save_dir, "daq_stream_data.csv")
 # ======================================================

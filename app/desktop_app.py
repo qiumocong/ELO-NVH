@@ -42,6 +42,11 @@ def main():
             raise SystemExit(f"更新执行失败，请查看 logs\\update.log: {exc}")
 
     configure_logging()
+    if "--self-test" in sys.argv:
+        from app.release_check import run_self_test
+
+        return run_self_test()
+
     if "--ni-self-test" in sys.argv:
         prepare_nidaqmx_runtime()
         import nidaqmx

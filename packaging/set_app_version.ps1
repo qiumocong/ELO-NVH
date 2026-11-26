@@ -1,16 +1,23 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Version
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
-
-if ($Version -notmatch '^\d+\.\d+\.\d+$') {
-    throw "Version must use MAJOR.MINOR.PATCH format, for example 0.1.3."
+$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$versionFile = Join-Path $repoRoot ".app_version"
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+$explicitVersion = -not [string]::IsNullOrWhiteSpace($Version)
+if (-not $explicitVersion) {
+    $Version = [System.IO.File]::ReadAllText($versionFile).Trim()
 }
 
-$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Version must use MAJOR.MINOR.PATCH format, for example 0.1.5."
+}
+
+if ($explicitVersion) {
+    [System.IO.File]::WriteAllText($versionFile, $Version + [Environment]::NewLine, $utf8NoBom)
+}
 
 function Update-VersionLine {
     param(
@@ -33,13 +40,9 @@ function Update-VersionLine {
 }
 
 Update-VersionLine `
-    (Join-Path $repoRoot "app\version.py") `
-    '(?m)^(APP_VERSION\s*=\s*")[^"]+(".*)$' `
-    "app/version.py"
-
-Update-VersionLine `
     (Join-Path $repoRoot "pyproject.toml") `
     '(?m)^(version\s*=\s*")[^"]+(".*)$' `
     "pyproject.toml"
 
 Write-Host "Application version synchronized to $Version."
+Write-Output $Version

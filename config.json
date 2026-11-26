@@ -18,9 +18,9 @@
   "backend_port": 8081,
   "plc_ip": "192.168.3.124",
   "plc_port": 1025,
-  "log_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\logs",
-  "data_save_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\logs\\saved_data",
-  "new_data_save_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\data",
-  "model_dir": "C:\\Users\\Noko\\PycharmProjects\\yanpu\\logs\\models",
+  "log_dir": "logs",
+  "data_save_dir": "logs/saved_data",
+  "new_data_save_dir": "data",
+  "model_dir": "logs/models",
   "enable_new_save": true
 }

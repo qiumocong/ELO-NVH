@@ -2,7 +2,7 @@
 import sys
 
 
-if not any(flag in sys.argv for flag in ("--mock", "--csv", "--no-backend")):
+if not any(flag in sys.argv for flag in ("--mock", "--csv", "--no-backend", "--self-test")):
     from app.ni_runtime import prepare_nidaqmx_runtime
 
     prepare_nidaqmx_runtime()
